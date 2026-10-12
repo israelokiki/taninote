@@ -715,7 +715,7 @@
         .map((s) => ({ t: s.t, c: s.c, w: clamp(s.w, 0, 1), pts: s.pts.filter((q) => Array.isArray(q) && q.length >= 2 && q.every((v) => typeof v === 'number' && isFinite(v))).map((q) => [q[0], q[1], q[2] == null ? 0.5 : q[2]]) }))
         .filter((s) => s.pts.length);
       const texts = (Array.isArray(p.texts) ? p.texts : []).filter((t) => t && typeof t.text === 'string' && isFinite(t.x) && isFinite(t.y) && /^#[0-9a-f]{6}$/i.test(t.c))
-        .map((t) => ({ x: clamp(t.x, 0, 1), y: Math.max(0, t.y), text: t.text.slice(0, 5000), size: clamp(+t.size || 18, 8, 80), c: t.c }));
+        .map((t) => { const o = { x: clamp(t.x, 0, 1), y: Math.max(0, t.y), text: t.text.slice(0, 5000), size: clamp(+t.size || 18, 8, 80), c: t.c }; if (typeof t.ff === 'string') { o.ff = t.ff.slice(0, 300).replace(/[;{}<>]/g, ''); o.lh = clamp(+t.lh || 1.5, 1, 3); o.fw = clamp(+t.fw || 400, 100, 900); if (t.ti) o.ti = clamp(+t.ti || 0, 0, 1); } return o; });
       pages[k] = { strokes, texts };
     }
     const extra = (Array.isArray(x.extra) ? x.extra : []).slice(0, 2000).map((e) => ({ paper: ['lined', 'grid', 'dots', 'blank'].includes(e && e.paper) ? e.paper : 'blank' }));
@@ -1486,24 +1486,30 @@
     for (const t of pg.texts) {
       if (!t.text.trim()) continue;
       const fs = t.size / BASE * W;
-      const pad = fs * 0.25;
+      const pad = t.ff ? 0 : fs * 0.25;  // notes matched to the page have no inner padding
       ctx.save();
       ctx.globalCompositeOperation = 'source-over';
-      ctx.font = `${fs}px ${UI_FONT}`;
-      ctx.fillStyle = t.c; ctx.textBaseline = 'top';
-      const maxW = (0.98 - t.x) * W - pad * 2;
-      const lh = fs * 1.3;
-      wrapLines(ctx, t.text, maxW).forEach((line, i) => ctx.fillText(line, t.x * W + pad, t.y * W + fs * 0.1 + (lh - fs) / 2 + i * lh));
+      ctx.font = `${t.fw || 400} ${fs}px ${t.ff || UI_FONT}`;
+      ctx.fillStyle = t.c; ctx.textBaseline = 'middle';
+      const maxW = (textRight(s) - t.x) * W - pad * 2;
+      const lh = fs * (t.lh || 1.3);
+      const top = t.y * W + (t.ff ? 0 : fs * 0.1);
+      const indent = (t.ti || 0) * W;
+      wrapLines(ctx, t.text, maxW, indent).forEach((line, i) => ctx.fillText(line, t.x * W + pad + (i === 0 ? indent : 0), top + lh / 2 + i * lh));
       ctx.restore();
     }
   }
-  function wrapLines(ctx, text, maxW) {
+  // Right edge that notes wrap at, as a fraction of page width (matches each page's text column)
+  const textRight = (s) => s.kind === 'tile' ? 728 / BASE : s.kind === 'blank' ? 0.91 : 0.98;
+  function wrapLines(ctx, text, maxW, indent = 0) {
     const out = [];
     for (const para of text.split('\n')) {
       let line = '';
       for (const word of para.split(/(\s+)/)) {
         const test = line + word;
-        if (line.trim() && ctx.measureText(test).width > maxW) { out.push(line.trimEnd()); line = word.trimStart(); }
+        const room = out.length === 0 ? maxW - indent : maxW;  // the very first line starts after the indent
+        if (line.trim() && ctx.measureText(test).width > room) { out.push(line.trimEnd()); line = word.trimStart(); }
+        else if (!line.trim() && out.length === 0 && indent && ctx.measureText(test).width > room) { out.push(''); line = word.trimStart(); }
         else line = test;
       }
       out.push(line);
@@ -1524,7 +1530,15 @@
     d.style.top = (t.y / s.aspect) * 100 + '%';
     d.style.fontSize = t.size * state.zoom + 'px';
     d.style.color = t.c;
-    d.style.maxWidth = (98 - t.x * 100) + '%';
+    d.style.maxWidth = Math.max(4, (textRight(s) - t.x) * 100) + '%';
+    if (t.ff) {
+      d.classList.add('matched');
+      d.style.fontFamily = t.ff;
+      d.style.lineHeight = String(t.lh || 1.5);
+      d.style.fontWeight = String(t.fw || 400);
+      d.style.textIndent = t.ti ? (t.ti * BASE * state.zoom) + 'px' : '';
+      if (t.ti) d.style.width = d.style.maxWidth;  // a full-width box so wrapped lines return to the margin
+    }
   }
   function textBox(s, t) {
     const d = el('div', 'tbox');
@@ -1546,11 +1560,69 @@
     return d;
   }
   // Start a typed note where the page was tapped.
+  const WORD_FONT = '"Aptos", "Calibri", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif';
+
+  // On a converted document, find the text line under the tap and borrow its font, size and position,
+  // so a note reads as if it were typed into the document.
+  function matchDocLine(s, clientX, clientY) {
+    if (s.kind !== 'tile' || !state.flow) return null;
+    const box = state.flow.box;
+    box.classList.add('probe');  // let the hit test see through the writing layer to the text
+    let range = null;
+    try {
+      if (document.caretRangeFromPoint) range = document.caretRangeFromPoint(clientX, clientY);
+      else if (document.caretPositionFromPoint) { const p = document.caretPositionFromPoint(clientX, clientY); if (p) { range = document.createRange(); range.setStart(p.offsetNode, p.offset); } }
+    } finally { box.classList.remove('probe'); }
+    if (!range || !state.flow.content.contains(range.startContainer)) return null;
+    const node = range.startContainer;
+    const elm = node.nodeType === 1 ? node : node.parentElement;
+    let rect = range.getClientRects()[0] || range.getBoundingClientRect();
+    if (!rect || !rect.height) {
+      // Collapsed at an empty spot: measure the character before the caret instead
+      if (node.nodeType === 3 && range.startOffset > 0) { const r2 = document.createRange(); r2.setStart(node, range.startOffset - 1); r2.setEnd(node, range.startOffset); rect = r2.getBoundingClientRect(); }
+    }
+    if (!rect || !rect.height) return null;
+    const cs = getComputedStyle(elm);
+    const z = state.zoom;
+    const size = parseFloat(cs.fontSize) || 17;
+    const lhPx = cs.lineHeight === 'normal' ? size * 1.25 : parseFloat(cs.lineHeight);
+    const mid = rect.top + rect.height / 2;
+    let lineTop = mid - (lhPx * z) / 2;
+    // Tapped in the space below the text: step down whole lines in the document's rhythm
+    const steps = Math.max(0, Math.round((clientY - mid) / (lhPx * z)));
+    lineTop += steps * lhPx * z;
+    const r = s.wrap.getBoundingClientRect();
+    const block = elm.closest('p, li, h1, h2, h3, h4, h5, h6, blockquote, pre, td, th, div, section') || state.flow.content;
+    const blockLeft = block.getBoundingClientRect().left;
+    let x = clientX, ti = 0;
+    // On the same line and past its end: continue right after the last word, then wrap back to the
+    // paragraph's left edge like real text (first-line indent).
+    if (!steps && clientX > rect.right) { x = blockLeft; ti = (rect.right + size * z * 0.28 - blockLeft) / r.width; }
+    else if (clientX - blockLeft < size * z * 3) x = blockLeft;  // tapped near the margin: line up with it
+    const fw = parseInt(cs.fontWeight, 10) || 400;
+    return {
+      x: (x - r.left) / r.width, ti: +ti.toFixed(4),
+      y: (lineTop - r.top) / r.width,
+      size, ff: cs.fontFamily.slice(0, 300), lh: +(lhPx / size).toFixed(3), fw: steps ? 400 : fw,
+    };
+  }
+
   function createTextAt(s, clientX, clientY) {
     const before = snap(s.key);
     const r = s.wrap.getBoundingClientRect();
     const set = state.settings.text;
-    const t = { x: clamp((clientX - r.left) / r.width, 0, 0.9), y: Math.max(0, (clientY - r.top) / r.width - set.w * 0.75 / BASE), text: '', size: set.w, c: set.c };
+    let t = { x: clamp((clientX - r.left) / r.width, 0, 0.9), y: Math.max(0, (clientY - r.top) / r.width - set.w * 0.75 / BASE), text: '', size: set.w, c: set.c };
+    const m = matchDocLine(s, clientX, clientY);
+    if (m) {
+      t = Object.assign(t, m, { x: clamp(m.x, 0, 0.9), y: Math.max(0, m.y) });
+    } else if (s.kind === 'blank') {
+      // Plain page: Word-like font, even line rhythm, and a left margin
+      const lhBase = set.w * 1.5;
+      const yPx = (clientY - r.top) / r.width * BASE;
+      const row = Math.max(0, Math.floor((yPx - 72) / lhBase));
+      const xNorm = (clientX - r.left) / r.width;
+      t = Object.assign(t, { ff: WORD_FONT, lh: 1.5, fw: 400, y: (72 + row * lhBase) / BASE, x: xNorm < 0.16 ? 72 / BASE : clamp(xNorm, 0, 0.9) });
+    }
     pageData(s.key, true).texts.push(t);
     const d = textBox(s, t);
     d._before = before;

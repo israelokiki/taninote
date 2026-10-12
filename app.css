@@ -821,3 +821,8 @@ body.tool-text .sheet { cursor: text; }
 @media (max-height: 700px) { .side-photo { height: 140px; } }
 @media (max-width: 980px) { .side-photo { display: none; } }
 .profile-name { white-space: nowrap; max-width: 18ch; overflow: hidden; text-overflow: ellipsis; }
+
+/* Notes matched to the page: no padding, so they sit exactly on the text line */
+.tbox.matched { padding: 0; min-width: 2px; }
+.tbox.matched:empty::before { content: ""; }
+.flowdoc.probe > .sheet { pointer-events: none; }

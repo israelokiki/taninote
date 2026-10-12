@@ -1,5 +1,5 @@
 // TaniNote service worker: keeps the app usable offline. Only same-origin files are cached.
-const CACHE = 'taninote-v1.6.1';
+const CACHE = 'taninote-v1.7.0';
 const CORE = [
   './', 'index.html', 'app.css', 'app.js', 'manifest.webmanifest',
   'icons/icon.svg', 'images/sidebar-photo.jpg', 'icons/favicon-32.png', 'icons/apple-touch-icon.png', 'icons/icon-192.png', 'icons/icon-512.png',
