@@ -39,7 +39,7 @@
     <div class="side-foot">
       <div class="side-photo" aria-hidden="true"><img src="images/sidebar-photo.jpg" alt="" width="520" height="420" decoding="async"></div>
       <div class="storage-mini" id="storageMini"></div>
-      <span class="version">Version 1.7.0</span>
+      <span class="version">Version 1.8.0</span>
     </div>
   </aside>
 
@@ -160,6 +160,7 @@
                 <option value="marked">Most marked up</option>
               </select>
             </label>
+            <button class="btn" id="newDocument"><i class="ph ph-file-plus" aria-hidden="true"></i><span>New document</span></button>
             <button class="btn" id="newNotebook"><i class="ph ph-notebook" aria-hidden="true"></i><span>New notebook</span></button>
             <label class="btn navy"><i class="ph ph-tray-arrow-down" aria-hidden="true"></i><span>Import</span><input type="file" id="filesInput" multiple hidden></label>
           </div>
@@ -338,6 +339,52 @@
         <button class="switch" id="penOnly" role="switch" aria-checked="false" title="Only the stylus draws. Fingers scroll and pinch.">
           <span class="switch-track"><span class="switch-thumb"></span></span><span>Pencil only</span>
         </button>
+      </div>
+    </div>
+
+    <!-- Text formatting, shown while editing a document's text -->
+    <div class="toolbar formatbar" id="formatBar" hidden role="toolbar" aria-label="Text formatting">
+      <div class="tool-group">
+        <select id="fmtBlock" aria-label="Paragraph style">
+          <option value="p">Normal text</option>
+          <option value="h1">Title</option>
+          <option value="h2">Heading</option>
+          <option value="h3">Subheading</option>
+          <option value="blockquote">Quote</option>
+          <option value="pre">Code</option>
+        </select>
+      </div>
+      <div class="tool-group">
+        <select id="fmtSize" aria-label="Font size">
+          <option value="">Size</option>
+          <option value="12">12</option><option value="14">14</option><option value="16">16</option><option value="17">17</option>
+          <option value="18">18</option><option value="20">20</option><option value="24">24</option><option value="28">28</option>
+          <option value="32">32</option><option value="40">40</option>
+        </select>
+      </div>
+      <div class="tool-group">
+        <button class="icon-btn fmt" data-cmd="bold" aria-label="Bold" title="Bold (Ctrl/Cmd B)"><i class="ph ph-text-b"></i></button>
+        <button class="icon-btn fmt" data-cmd="italic" aria-label="Italic" title="Italic (Ctrl/Cmd I)"><i class="ph ph-text-italic"></i></button>
+        <button class="icon-btn fmt" data-cmd="underline" aria-label="Underline" title="Underline (Ctrl/Cmd U)"><i class="ph ph-text-underline"></i></button>
+        <button class="icon-btn fmt" data-cmd="strikeThrough" aria-label="Strikethrough" title="Strikethrough"><i class="ph ph-text-strikethrough"></i></button>
+      </div>
+      <div class="tool-group">
+        <label class="icon-btn color-pick" title="Text colour"><i class="ph ph-text-aa"></i><span class="bar" id="fmtColorBar"></span><input type="color" id="fmtColor" value="#2257d6" aria-label="Text colour"></label>
+        <button class="icon-btn hl-apply" id="fmtHl" aria-label="Highlight" title="Highlight"><i class="ph ph-highlighter"></i><span class="bar" id="fmtHlBar"></span></button>
+        <span class="hl-swatches" id="fmtHlSwatches" role="radiogroup" aria-label="Highlight colour"></span>
+      </div>
+      <div class="tool-group">
+        <button class="icon-btn fmt" data-cmd="insertUnorderedList" aria-label="Bulleted list" title="Bulleted list"><i class="ph ph-list-bullets"></i></button>
+        <button class="icon-btn fmt" data-cmd="insertOrderedList" aria-label="Numbered list" title="Numbered list"><i class="ph ph-list-numbers"></i></button>
+      </div>
+      <div class="tool-group">
+        <button class="icon-btn fmt" data-cmd="justifyLeft" aria-label="Align left" title="Align left"><i class="ph ph-text-align-left"></i></button>
+        <button class="icon-btn fmt" data-cmd="justifyCenter" aria-label="Centre" title="Centre"><i class="ph ph-text-align-center"></i></button>
+        <button class="icon-btn fmt" data-cmd="justifyRight" aria-label="Align right" title="Align right"><i class="ph ph-text-align-right"></i></button>
+        <button class="icon-btn fmt" data-cmd="justifyFull" aria-label="Justify" title="Justify"><i class="ph ph-text-align-justify"></i></button>
+      </div>
+      <div class="tool-group">
+        <button class="icon-btn" id="fmtClear" aria-label="Clear formatting" title="Clear formatting"><i class="ph ph-text-t-slash"></i></button>
       </div>
     </div>
   </header>

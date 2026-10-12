@@ -22,8 +22,8 @@
     text:   { label: 'Text', min: 10, max: 48, step: 1, w: 18, c: PENS[0][1] },
   };
 
-  const KIND_LABEL = { pdf: 'PDF', docx: 'Word', pptx: 'Slides', epub: 'EPUB', image: 'Image', notebook: 'Notebook', md: 'Markdown', html: 'HTML', text: 'Text' };
-  const KIND_ICON = { pdf: 'ph-file-pdf', docx: 'ph-file-doc', pptx: 'ph-presentation', epub: 'ph-book-open', image: 'ph-image', md: 'ph-file-text', html: 'ph-file-html', text: 'ph-file-text', notebook: 'ph-notebook' };
+  const KIND_LABEL = { pdf: 'PDF', docx: 'Word', pptx: 'Slides', epub: 'EPUB', image: 'Image', notebook: 'Notebook', md: 'Markdown', html: 'HTML', text: 'Text', doc: 'Document' };
+  const KIND_ICON = { pdf: 'ph-file-pdf', docx: 'ph-file-doc', pptx: 'ph-presentation', epub: 'ph-book-open', image: 'ph-image', md: 'ph-file-text', html: 'ph-file-html', text: 'ph-file-text', notebook: 'ph-notebook', doc: 'ph-file-text' };
   const OLD_FORMATS = {
     doc: 'Word 97-2003 files (.doc)', ppt: 'PowerPoint 97-2003 files (.ppt)', xls: 'Excel files (.xls)', xlsx: 'Excel workbooks',
     pages: 'Apple Pages files', key: 'Keynote files', numbers: 'Numbers files', odt: 'OpenDocument files', odp: 'OpenDocument files',
@@ -719,7 +719,9 @@
       pages[k] = { strokes, texts };
     }
     const extra = (Array.isArray(x.extra) ? x.extra : []).slice(0, 2000).map((e) => ({ paper: ['lined', 'grid', 'dots', 'blank'].includes(e && e.paper) ? e.paper : 'blank' }));
-    return { id: x.id, pages, extra };
+    const out = { id: x.id, pages, extra };
+    if (typeof x.html === 'string' && x.html.length < 20e6) out.html = sanitizeEdited(x.html);
+    return out;
   }
 
   async function restore(file) {
@@ -1216,6 +1218,7 @@
     }
     if (k === 'md') return sanitize(marked.parse(await doc.blob.text()));
     if (k === 'html') return sanitize(await doc.blob.text());
+    if (k === 'doc') return '<h1><br></h1><p><br></p>';
     if (k === 'text') return '<pre class="plain">' + esc(await doc.blob.text()) + '</pre>';
     if (k === 'epub') return epubToHtml(doc.blob);
     if (k === 'pptx') return pptxToHtml(doc.blob);
@@ -1636,6 +1639,10 @@
     if (e.target.closest('.tbox')) return;
     const fingerInPenOnly = state.penOnly && isDrawTool() && tapState.type === 'touch';
     if (state.tool !== 'text' && state.tool !== 'scroll' && !fingerInPenOnly) return;
+    if (editableDoc()) {  // documents are edited directly: put the cursor in the text instead of a floating note
+      if (state.tool !== 'text') { setTool('text'); placeCaret(e.clientX, e.clientY); }
+      return;
+    }
     if (tapState.wasEditing) return;  // the tap just finished the note being typed
     createTextAt(s, e.clientX, e.clientY);
   }
@@ -1709,7 +1716,8 @@
     const tap = a.stroke && !cancelled && a.type !== 'pen' && performance.now() - a.start < 350 && Math.hypot(e.clientX - a.x, e.clientY - a.y) < 6;
     if (tap) {
       redrawInk(s);
-      if (!a.wasEditing) createTextAt(s, e.clientX, e.clientY);
+      if (editableDoc()) { setTool('text'); placeCaret(e.clientX, e.clientY); }
+      else if (!a.wasEditing) createTextAt(s, e.clientX, e.clientY);
       return;
     }
     if (a.stroke && !(cancelled && a.stroke.pts.length < 3)) {
@@ -1835,6 +1843,10 @@
     if (v && v.scroll) scroller.scrollTop = v.scroll * scroller.scrollHeight;
     else scroller.scrollTop = 0;
     updatePageInd();
+    state.editDirty = false;
+    document.querySelector('.tool[data-tool="text"]').title = editableDoc() ? 'Edit text (T)' : 'Text (T)';
+    if (state.startTyping && editableDoc()) { state.startTyping = false; setTool('text'); const first = state.flow.content.firstElementChild; if (first) { const r = document.createRange(); r.setStart(first, 0); r.collapse(true); state.flow.content.focus(); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); } }
+    else setTool(state.tool);
     doc.opened = Date.now();
     db.put('docs', doc).catch(() => {});
   }
@@ -1876,10 +1888,19 @@
       return;
     }
     // Reflowable: render once at a fixed width, slice into A4-height writing tiles.
-    const html = await toHtml(doc);
+    const html = state.ink.html ? sanitizeEdited(state.ink.html) : await toHtml(doc);
     const box = el('div', 'flowdoc');
     const content = el('div', 'flow');
     content.innerHTML = html;
+    content.addEventListener('input', onEditInput);
+    // Paste is cleaned the same way saved text is, so nothing unsafe gets into the document
+    content.addEventListener('paste', (e) => {
+      if (!e.clipboardData) return;
+      const h = e.clipboardData.getData('text/html'), t = e.clipboardData.getData('text/plain');
+      e.preventDefault();
+      if (h) document.execCommand('insertHTML', false, sanitizeEdited(h));
+      else document.execCommand('insertText', false, t);
+    });
     box.append(content);
     stage.append(box);
     await Promise.race([
@@ -1912,6 +1933,8 @@
   async function closeDoc() {
     if (!state.doc) return;
     blurText();
+    setEditing(false);
+    flushEdit();
     await save();
     const doc = state.doc;
     doc.stats = inkStats(state.ink, state.sheets.length);
@@ -2199,6 +2222,174 @@
   // ---------------------------------------------------------------------------
   // Toolbar
   // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Word-style text editing for converted documents and new Documents
+  // ---------------------------------------------------------------------------
+  const EDIT_STYLE_PROPS = ['color', 'background-color', 'font-size', 'font-weight', 'font-style', 'text-decoration', 'text-decoration-line', 'text-align'];
+  // Edited HTML is saved and re-opened, so it's cleaned every time: no scripts or event handlers,
+  // and inline styles reduced to a short list of text properties.
+  function sanitizeEdited(html) {
+    if (!window.DOMPurify) return '';
+    const hook = (node, data) => {
+      if (data.attrName !== 'style') return;
+      const tmp = document.createElement('span');
+      tmp.setAttribute('style', data.attrValue);
+      const keep = [];
+      for (const p of EDIT_STYLE_PROPS) { const v = tmp.style.getPropertyValue(p); if (v && !/url\(|expression|javascript:/i.test(v)) keep.push(`${p}: ${v}`); }
+      if (keep.length) data.attrValue = keep.join('; '); else data.keepAttr = false;
+    };
+    DOMPurify.addHook('uponSanitizeAttribute', hook);
+    try { return DOMPurify.sanitize(html, { FORBID_TAGS: PURIFY.FORBID_TAGS, FORBID_ATTR: ['id', 'contenteditable'] }); }
+    finally { DOMPurify.removeHook('uponSanitizeAttribute'); }
+  }
+
+  const editableDoc = () => !!(state.flow && state.doc && state.doc.kind !== 'pdf' && state.doc.kind !== 'image');
+  const isEditing = () => document.body.classList.contains('editing');
+  let editSaveTimer = 0, reflowTimer = 0, savedRange = null;
+  const HL_COLORS = [['Yellow', '#ffe14d'], ['Green', '#a8f0b0'], ['Pink', '#ffb3d4'], ['Blue', '#b3dcff']];
+  let hlColor = store.get('hlText', HL_COLORS[0][1]);
+
+  function setEditing(on) {
+    const c = state.flow && state.flow.content;
+    on = !!(on && c);
+    if (c) { c.contentEditable = on ? 'true' : 'false'; c.spellcheck = on; }
+    if (on === isEditing()) return;
+    const before = document.querySelector('.vbar').offsetHeight;
+    document.body.classList.toggle('editing', on);
+    $('#formatBar').hidden = !on;
+    measureBar();
+    scroller.scrollTop += document.querySelector('.vbar').offsetHeight - before;  // keep the page still
+    if (on) { $('#undoBtn').disabled = false; $('#redoBtn').disabled = false; updateFormatState(); }
+    else { flushEdit(); updateUndoUi(); }
+  }
+
+  function onEditInput() {
+    state.editDirty = true;
+    clearTimeout(editSaveTimer); editSaveTimer = setTimeout(flushEdit, 700);
+    clearTimeout(reflowTimer); reflowTimer = setTimeout(reflowFlow, 250);
+    $('#saveStatus').textContent = 'Saving';
+  }
+  function flushEdit() {
+    clearTimeout(editSaveTimer);
+    if (!state.editDirty || !state.flow || !state.ink) return;
+    state.editDirty = false;
+    state.ink.html = sanitizeEdited(state.flow.content.innerHTML);
+    markDirty();
+  }
+
+  // The document reflows as you type: add or drop writing pages so the page count follows the text.
+  function reflowFlow() {
+    const f = state.flow;
+    if (!f) return;
+    f.content.style.height = '';
+    const need = Math.max(1, Math.ceil((f.content.offsetHeight + 40) / TILE));
+    const tiles = state.sheets.filter((s) => s.kind === 'tile');
+    while (tiles.length < need) {
+      const i = tiles.length;
+      const s = makeSheet('s' + i, 'tile', TILE / BASE);
+      state.sheets.pop(); state.sheets.splice(i, 0, s);
+      s.tile = i; f.box.append(s.wrap); observer.observe(s.wrap); tiles.push(s);
+    }
+    while (tiles.length > need) {
+      const s = tiles[tiles.length - 1];
+      const pg = pageData(s.key);
+      if (pg && (pg.strokes.length || pg.texts.length)) break;  // never drop a page you wrote on
+      observer.unobserve(s.wrap); s.wrap.remove();
+      state.sheets.splice(state.sheets.indexOf(s), 1); tiles.pop();
+    }
+    f.tiles = tiles.length;
+    f.content.style.height = f.tiles * TILE + 'px';
+    layout();
+    updatePageInd();
+  }
+
+  document.addEventListener('selectionchange', () => {
+    const c = state.flow && state.flow.content;
+    const sel = getSelection();
+    if (c && isEditing() && sel.rangeCount && c.contains(sel.anchorNode)) { savedRange = sel.getRangeAt(0).cloneRange(); updateFormatState(); }
+  });
+  function restoreSel() {
+    const c = state.flow && state.flow.content;
+    if (!c) return;
+    c.focus({ preventScroll: true });
+    if (savedRange && c.contains(savedRange.startContainer)) { const s = getSelection(); s.removeAllRanges(); s.addRange(savedRange); }
+  }
+  function exec(cmd, val) {
+    restoreSel();
+    document.execCommand('styleWithCSS', false, cmd === 'hiliteColor' || cmd === 'foreColor' || cmd === 'backColor');
+    let ok = document.execCommand(cmd, false, val);
+    if (!ok && cmd === 'hiliteColor') ok = document.execCommand('backColor', false, val);
+    // Formatting splits text nodes, so remember the live selection rather than the stale one
+    const sel = getSelection();
+    if (sel.rangeCount) savedRange = sel.getRangeAt(0).cloneRange();
+    onEditInput();
+    updateFormatState();
+  }
+  function setFontSize(px) {
+    restoreSel();
+    document.execCommand('styleWithCSS', false, false);
+    document.execCommand('fontSize', false, '7');
+    state.flow.content.querySelectorAll('font[size="7"]').forEach((f) => {
+      const span = document.createElement('span');
+      span.style.fontSize = px + 'px';
+      while (f.firstChild) span.appendChild(f.firstChild);
+      f.replaceWith(span);
+    });
+    onEditInput();
+  }
+  function updateFormatState() {
+    if (!isEditing()) return;
+    document.querySelectorAll('#formatBar .fmt').forEach((b) => {
+      let on = false;
+      try { on = document.queryCommandState(b.dataset.cmd); } catch { /* unsupported */ }
+      b.setAttribute('aria-pressed', String(on));
+    });
+    let block = '';
+    try { block = String(document.queryCommandValue('formatBlock') || '').toLowerCase().replace(/[<>]/g, ''); } catch { /* unsupported */ }
+    $('#fmtBlock').value = ['h1', 'h2', 'h3', 'blockquote', 'pre'].includes(block) ? block : 'p';
+  }
+
+  // Put the text cursor where the page was tapped
+  function placeCaret(clientX, clientY) {
+    const c = state.flow && state.flow.content;
+    if (!c) return;
+    let range = null;
+    if (document.caretRangeFromPoint) range = document.caretRangeFromPoint(clientX, clientY);
+    else if (document.caretPositionFromPoint) { const p = document.caretPositionFromPoint(clientX, clientY); if (p) { range = document.createRange(); range.setStart(p.offsetNode, p.offset); } }
+    c.focus({ preventScroll: true });
+    if (range && c.contains(range.startContainer)) { const s = getSelection(); s.removeAllRanges(); s.addRange(range); }
+  }
+
+  function renderHlSwatches() {
+    const box = $('#fmtHlSwatches');
+    box.innerHTML = '';
+    for (const [name, c] of HL_COLORS) {
+      const b = el('button');
+      b.style.setProperty('--c', c);
+      b.title = name + ' highlight'; b.setAttribute('aria-label', name + ' highlight');
+      b.setAttribute('role', 'radio'); b.setAttribute('aria-checked', String(c === hlColor));
+      b.addEventListener('mousedown', (e) => e.preventDefault());
+      b.onclick = () => { hlColor = c; store.set('hlText', c); $('#fmtHlBar').style.setProperty('--bar', c); renderHlSwatches(); exec('hiliteColor', c); };
+      box.append(b);
+    }
+    const none = el('button', 'none');
+    none.title = 'Remove highlight'; none.setAttribute('aria-label', 'Remove highlight');
+    none.addEventListener('mousedown', (e) => e.preventDefault());
+    none.onclick = () => exec('hiliteColor', 'transparent');
+    box.append(none);
+    $('#fmtHlBar').style.setProperty('--bar', hlColor);
+  }
+
+  async function newDocument() {
+    const now = Date.now();
+    const doc = { id: uid(), name: 'Document ' + new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'short' }), kind: 'doc', created: now, updated: now, pages: 1 };
+    if (ui.filter.startsWith('s:')) doc.subject = ui.filter.slice(2);
+    await db.put('docs', doc);
+    await db.put('ink', { id: doc.id, pages: {}, extra: [] });
+    state.startTyping = true;
+    openDoc(doc.id);
+  }
+
   function setTool(tool) {
     if (tool !== 'text') blurText();
     state.tool = tool;
@@ -2208,6 +2399,7 @@
     renderInks();
     renderSize();
     moveNib();
+    setEditing(tool === 'text' && editableDoc());
   }
 
   function moveNib() {
@@ -2293,8 +2485,8 @@
     store.set('settings', state.settings);
     renderSize();
   });
-  $('#undoBtn').addEventListener('click', doUndo);
-  $('#redoBtn').addEventListener('click', doRedo);
+  $('#undoBtn').addEventListener('click', () => { if (isEditing()) { restoreSel(); document.execCommand('undo'); onEditInput(); } else doUndo(); });
+  $('#redoBtn').addEventListener('click', () => { if (isEditing()) { restoreSel(); document.execCommand('redo'); onEditInput(); } else doRedo(); });
   $('#zoomIn').addEventListener('click', () => setZoom(state.zoom * 1.2));
   $('#zoomOut').addEventListener('click', () => setZoom(state.zoom / 1.2));
   $('#zoomVal').addEventListener('click', () => setZoom(fitZoom()));
@@ -2317,6 +2509,17 @@
     $(id).addEventListener('change', (e) => { importFiles(e.target.files); e.target.value = ''; });
   }
   $('#newNotebook').addEventListener('click', newNotebook);
+  $('#newDocument').addEventListener('click', newDocument);
+  // Formatting bar: buttons must not steal the text selection
+  $('#formatBar').addEventListener('mousedown', (e) => { if (e.target.closest('button')) e.preventDefault(); });
+  document.querySelectorAll('#formatBar .fmt').forEach((b) => b.addEventListener('click', () => exec(b.dataset.cmd)));
+  $('#fmtBlock').addEventListener('change', (e) => exec('formatBlock', '<' + e.target.value + '>'));
+  $('#fmtSize').addEventListener('change', (e) => { if (e.target.value) setFontSize(+e.target.value); e.target.value = ''; });
+  $('#fmtColor').addEventListener('input', (e) => { $('#fmtColorBar').style.setProperty('--bar', e.target.value); });
+  $('#fmtColor').addEventListener('change', (e) => exec('foreColor', e.target.value));
+  $('#fmtHl').addEventListener('click', () => exec('hiliteColor', hlColor));
+  $('#fmtClear').addEventListener('click', () => { exec('removeFormat'); exec('hiliteColor', 'transparent'); exec('formatBlock', '<p>'); });
+  renderHlSwatches();
   $('#search').addEventListener('input', () => { if (ui.view !== 'files' && ui.view !== 'notebooks') showView('files'); else renderFiles(); });
   document.querySelectorAll('.nav-item, .tab').forEach((b) => b.addEventListener('click', () => showView(b.dataset.view)));
   $('#recentSort').addEventListener('change', renderDashboard);
