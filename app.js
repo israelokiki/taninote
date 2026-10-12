@@ -838,22 +838,20 @@
     if (!ring.el) {
       ring.el = new Audio();
       ring.el.loop = true;
-      // Loud chain: heavy boost, fast compressor to raise the average, then a soft clipper so peaks
-      // round off just under 0 dB instead of crackling.
+      // Loud but clean: a gentle compressor lifts the quiet parts, then a limiter holds peaks under 0 dB.
+      // No clipping stage, so it never crackles.
       ring.gain = audioCtx.createGain();
       const comp = audioCtx.createDynamicsCompressor();
-      comp.threshold.value = -18; comp.knee.value = 6; comp.ratio.value = 12; comp.attack.value = 0.002; comp.release.value = 0.15;
-      const makeup = audioCtx.createGain(); makeup.gain.value = 4;
-      const clip = audioCtx.createWaveShaper();
-      const curve = new Float32Array(2048);
-      for (let i = 0; i < curve.length; i++) { const x = (i / (curve.length - 1)) * 2 - 1; curve[i] = Math.tanh(x * 1.6) / Math.tanh(1.6); }
-      clip.curve = curve; clip.oversample = '4x';
-      const ceiling = audioCtx.createGain(); ceiling.gain.value = 0.89;
-      audioCtx.createMediaElementSource(ring.el).connect(ring.gain).connect(comp).connect(makeup).connect(clip).connect(ceiling).connect(audioCtx.destination);
+      comp.threshold.value = -16; comp.knee.value = 10; comp.ratio.value = 4; comp.attack.value = 0.006; comp.release.value = 0.25;
+      const makeup = audioCtx.createGain(); makeup.gain.value = 1.8;
+      const limiter = audioCtx.createDynamicsCompressor();
+      limiter.threshold.value = -2; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = 0.001; limiter.release.value = 0.2;
+      const ceiling = audioCtx.createGain(); ceiling.gain.value = 0.88;
+      audioCtx.createMediaElementSource(ring.el).connect(ring.gain).connect(comp).connect(makeup).connect(limiter).connect(ceiling).connect(audioCtx.destination);
     }
     ring.el.src = url;
     ring.el.currentTime = 0;
-    ring.gain.gain.value = 4;
+    ring.gain.gain.value = 2;
     // Duck any reading music under the ringtone
     if (snd.master) snd.master.gain.setTargetAtTime(snd.volume * MAX_BOOST * 0.15, audioCtx.currentTime, 0.2);
     try { await ring.el.play(); } catch { /* browser blocked sound before any tap; the card and notification still show */ }
