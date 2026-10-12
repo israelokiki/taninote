@@ -807,22 +807,65 @@
   addEventListener('pointerdown', unlockAudio, { passive: true });
   addEventListener('keydown', unlockAudio);
 
-  function chime() {
+  // ---- Ringtone: loops loudly until the reminder is answered ----
+  const RINGTONE = 'music/ringing/music_for_videos-minimal-165271.mp3';
+  const ring = { el: null, url: null, gain: null, vibe: 0, on: false };
+
+  // Keep the ringtone in memory (and in the browser cache) so it rings instantly, even offline.
+  async function loadRingtone() {
+    if (ring.url) return ring.url;
+    const src = encodeURI(RINGTONE);
+    let res = null;
+    try { const c = await caches.open('taninote-ringtone'); res = await c.match(src); if (!res) { const r = await fetch(src); if (r.ok) { await c.put(src, r.clone()); res = r; } } }
+    catch { try { res = await fetch(src); } catch { /* offline and not cached */ } }
+    if (!res || !res.ok) return null;
+    ring.url = URL.createObjectURL(await res.blob());
+    return ring.url;
+  }
+
+  async function startRinging() {
+    if (ring.on) return;
+    ring.on = true;
     unlockAudio();
-    if (!audioCtx) return;
-    const ring = (at) => [[659.25, 0], [783.99, 0.16], [1046.5, 0.32]].forEach(([f, d]) => {
-      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-      o.type = 'sine'; o.frequency.value = f;
-      const t = at + d;
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.22, t + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 1.1);
-      o.connect(g).connect(audioCtx.destination);
-      o.start(t); o.stop(t + 1.2);
-    });
-    const now = audioCtx.currentTime + 0.03;
-    ring(now); ring(now + 1.5);
-    if (navigator.vibrate) navigator.vibrate([180, 90, 180]);
+    const url = await loadRingtone();
+    if (!ring.on) return;  // stopped while loading
+    if (navigator.vibrate) {
+      navigator.vibrate([400, 200, 400]);
+      ring.vibe = setInterval(() => navigator.vibrate([400, 200, 400]), 2500);
+    }
+    if (!url || !audioCtx) return;
+    if (audioCtx.state === 'suspended') await audioCtx.resume().catch(() => {});
+    if (!ring.el) {
+      ring.el = new Audio();
+      ring.el.loop = true;
+      // Loud chain: heavy boost, fast compressor to raise the average, then a soft clipper so peaks
+      // round off just under 0 dB instead of crackling.
+      ring.gain = audioCtx.createGain();
+      const comp = audioCtx.createDynamicsCompressor();
+      comp.threshold.value = -18; comp.knee.value = 6; comp.ratio.value = 12; comp.attack.value = 0.002; comp.release.value = 0.15;
+      const makeup = audioCtx.createGain(); makeup.gain.value = 4;
+      const clip = audioCtx.createWaveShaper();
+      const curve = new Float32Array(2048);
+      for (let i = 0; i < curve.length; i++) { const x = (i / (curve.length - 1)) * 2 - 1; curve[i] = Math.tanh(x * 1.6) / Math.tanh(1.6); }
+      clip.curve = curve; clip.oversample = '4x';
+      const ceiling = audioCtx.createGain(); ceiling.gain.value = 0.89;
+      audioCtx.createMediaElementSource(ring.el).connect(ring.gain).connect(comp).connect(makeup).connect(clip).connect(ceiling).connect(audioCtx.destination);
+    }
+    ring.el.src = url;
+    ring.el.currentTime = 0;
+    ring.gain.gain.value = 4;
+    // Duck any reading music under the ringtone
+    if (snd.master) snd.master.gain.setTargetAtTime(snd.volume * MAX_BOOST * 0.15, audioCtx.currentTime, 0.2);
+    try { await ring.el.play(); } catch { /* browser blocked sound before any tap; the card and notification still show */ }
+  }
+
+  function stopRinging() {
+    if (!ring.on) return;
+    ring.on = false;
+    clearInterval(ring.vibe);
+    if (navigator.vibrate) navigator.vibrate(0);
+    if (ring.el) { ring.el.pause(); ring.el.currentTime = 0; }
+    if (snd.master && audioCtx) snd.master.gain.setTargetAtTime(snd.volume * MAX_BOOST, audioCtx.currentTime, 0.4);
   }
 
   function sessionStart(p) {
@@ -867,10 +910,10 @@
   let shownReminder = null;
   async function fireReminder(p) {
     const { title, body, doc } = reminderText(p);
-    if (REM.sound) chime();
+    if (REM.sound) startRinging();
     showReminderCard(p, title, body, doc);
     if (window.Notification && Notification.permission === 'granted' && (document.hidden || !document.hasFocus())) {
-      const opts = { body, icon: 'icons/icon-192.png', badge: 'icons/favicon-32.png', tag: 'session-' + p.id, renotify: true, requireInteraction: true, silent: !REM.sound, data: { session: p.id } };
+      const opts = { body, icon: 'icons/icon-192.png', badge: 'icons/favicon-32.png', tag: 'session-' + p.id, renotify: true, requireInteraction: true, silent: REM.sound, data: { session: p.id } };
       try {
         const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
         if (reg) await reg.showNotification('Time to study: ' + title, opts);
@@ -889,7 +932,7 @@
     $('#reminder').hidden = false;
     setTimeout(() => ($('#remOpen').hidden ? $('#remClose') : $('#remOpen')).focus({ preventScroll: true }), 50);
   }
-  function hideReminder() { $('#reminder').hidden = true; shownReminder = null; }
+  function hideReminder() { stopRinging(); $('#reminder').hidden = true; shownReminder = null; }
 
   async function snooze(p, minutes) {
     p.snoozeUntil = Date.now() + minutes * 60000;
@@ -929,6 +972,7 @@
         try { await Notification.requestPermission(); } catch { /* old Safari callback form */ }
       }
       toast('Reminders are on');
+      loadRingtone();
       checkReminders();
     }
     renderSettings();
@@ -2238,14 +2282,14 @@
   $('#soundPanel').addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeSoundPanel(); } });
 
   $('#setRemind').addEventListener('click', () => setRemind(!REM.on));
-  $('#setSound').addEventListener('click', () => { store.set('remindSound', !REM.sound); if (REM.sound) chime(); renderSettings(); });
+  $('#setSound').addEventListener('click', () => { store.set('remindSound', !REM.sound); if (REM.sound) { startRinging(); setTimeout(stopRinging, 2500); } renderSettings(); });
   $('#setLead').addEventListener('change', (e) => { store.set('remindLead', +e.target.value); });
   $('#testRemind').addEventListener('click', () => {
     unlockAudio();
     const next = plan.filter((p) => !p.done && sessionStart(p) > Date.now()).sort((a, b) => sessionStart(a) - sessionStart(b))[0];
     const demo = { test: true, title: next ? next.title : 'Study session', time: next ? next.time : '', docId: next ? next.docId : null };
     const doc = demo.docId && libDocs.find((d) => d.id === demo.docId);
-    if (REM.sound) chime();
+    if (REM.sound) startRinging();
     showReminderCard(demo, 'Time to study: ' + demo.title, 'This is how reminders look and sound.' + (next ? ` Your next session is at ${next.time}.` : ''), doc);
     if (window.Notification && Notification.permission === 'granted' && navigator.serviceWorker) {
       navigator.serviceWorker.getRegistration().then((reg) => reg && reg.showNotification('Time to study: ' + demo.title, { body: 'This is how reminders look.', icon: 'icons/icon-192.png', tag: 'test', silent: true })).catch(() => {});
@@ -2311,7 +2355,7 @@
   setTool('pen');
   const launchSession = new URLSearchParams(location.search).get('session');
   history.replaceState(null, '', location.pathname);
-  refresh().then(() => { if (launchSession && ID_RE.test(launchSession)) openSessionFile(launchSession); });
+  refresh().then(() => { if (launchSession && ID_RE.test(launchSession)) openSessionFile(launchSession); if (REM.on) loadRingtone(); });
   if (!window.pdfjsLib || !window.PDFLib) toast('Some file readers didn\'t load. Reload TaniNote to try again.', 6000);
   // Offline support: cache the app so it opens without a connection.
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
