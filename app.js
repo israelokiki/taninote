@@ -940,15 +940,15 @@
   // Imported sounds stay on this device in IndexedDB. Both loop through the same volume, fades and timer.
   const SOUNDS = [
     { id: 'piano', name: 'Soft piano', by: 'kalsstockmedia', src: 'music/kalsstockmedia-soft-piano-music-10-minutes-long-231315.mp3', icon: 'ph-piano-keys', bg: '#bdeef0' },
-    { id: 'sleep', name: 'Relaxing sleep', by: 'atlasaudio', src: 'music/atlasaudio-relaxing-sleep-583152.mp3', icon: 'ph-moon-stars', bg: '#c9dcff' },
-    { id: 'relaxing', name: 'Relaxing', by: 'leberch', src: 'music/leberch-relaxing-583082.mp3', icon: 'ph-flower-lotus', bg: '#f4c3cd' },
+    { id: 'sleep', name: 'Relaxing sleep', by: 'atlasaudio', src: 'music/atlasaudio-relaxing-sleep-583152.mp3', boost: 1.4, icon: 'ph-moon-stars', bg: '#c9dcff' },
+    { id: 'relaxing', name: 'Relaxing', by: 'leberch', src: 'music/leberch-relaxing-583082.mp3', boost: 2, icon: 'ph-flower-lotus', bg: '#f4c3cd' },
     { id: 'background', name: 'Relax background', by: 'sigmamusicart', src: 'music/sigmamusicart-relaxing-relax-background-music-537728.mp3', icon: 'ph-cloud-moon', bg: '#d9daf5' },
-    { id: 'calm', name: 'Relaxing music', by: 'arpmedia', src: 'music/arpmedia-relaxing-relaxing-music-577813.mp3', icon: 'ph-music-notes-simple', bg: '#fbdcae' },
+    { id: 'calm', name: 'Relaxing music', by: 'arpmedia', src: 'music/arpmedia-relaxing-relaxing-music-577813.mp3', boost: 1.7, icon: 'ph-music-notes-simple', bg: '#fbdcae' },
   ];
   const AUDIO_EXT = /\.(mp3|m4a|aac|wav|ogg|oga|opus|flac|webm|mp4)$/i;
   const MAX_SOUND = 80 * 1024 * 1024;
-  const MAX_BOOST = 1.8;  // full slider = 1.8x the track's own level
-  const snd = { playing: null, voice: null, master: null, volume: +store.get('sndVol', 0.8), timer: 0, stopAt: 0, mine: [] };
+  const MAX_BOOST = 3.5;  // full slider = 3.5x the track's own level, held at 0 dB peak by the limiter
+  const snd = { playing: null, voice: null, master: null, volume: +store.get('sndVol2', 1), timer: 0, stopAt: 0, mine: [] };
 
   function masterOut() {
     unlockAudio();
@@ -958,7 +958,7 @@
       snd.master.gain.value = snd.volume * MAX_BOOST;
       // Brick-wall limiter so the boosted top of the volume range never distorts.
       const limiter = audioCtx.createDynamicsCompressor();
-      limiter.threshold.value = -3; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = 0.002; limiter.release.value = 0.25;
+      limiter.threshold.value = -0.5; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = 0.001; limiter.release.value = 0.2;
       snd.master.connect(limiter).connect(audioCtx.destination);
     }
     return snd.master;
@@ -1005,7 +1005,7 @@
     const cleanup = () => { el.pause(); if (own) URL.revokeObjectURL(el.src); el.removeAttribute('src'); el.load(); };
     const t = audioCtx.currentTime;
     bus.gain.setValueAtTime(0, t);
-    bus.gain.linearRampToValueAtTime(1, t + 2);
+    bus.gain.linearRampToValueAtTime(track.boost || 1, t + 2);  // quieter recordings get lifted to match
     snd.voice = { bus, cleanup };
     snd.playing = id;
     store.set('sndLast', id);
@@ -1029,7 +1029,7 @@
 
   function setVolume(v) {
     snd.volume = v;
-    store.set('sndVol', v);
+    store.set('sndVol2', v);
     if (snd.master) snd.master.gain.setTargetAtTime(v * MAX_BOOST, audioCtx.currentTime, 0.08);
   }
 
