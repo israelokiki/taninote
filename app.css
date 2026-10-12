@@ -954,3 +954,15 @@ body.editing .flowdoc > .sheet .tbox { pointer-events: auto; }
   .card-head .mini-select { padding-left: 6px; font-size: 13px; }
   .card { padding: 16px 14px; }
 }
+
+/* Colour swatches: room for the selection ring so it never overlaps a neighbour */
+.hl-swatches { gap: 9px; padding: 0 6px 0 8px; }
+.hl-swatches button { width: 20px; height: 20px; }
+.hl-swatches button[aria-checked="true"] { box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.1), 0 0 0 2px var(--panel), 0 0 0 3.5px #262b4a; }
+.inks { gap: 6px; padding: 0 8px; }
+.swatch { width: 28px; height: 28px; }
+.swatch span { width: 18px; height: 18px; }
+.swatch.hl span { width: 20px; height: 13px; }
+.swatch[aria-checked="true"] span { transform: none; box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.12), 0 0 0 2px var(--panel), 0 0 0 3.5px var(--c); }
+:root[data-theme="dark"] .hl-swatches button[aria-checked="true"] { box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.1), 0 0 0 2px var(--panel), 0 0 0 3.5px #f2c94c; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .hl-swatches button[aria-checked="true"] { box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.1), 0 0 0 2px var(--panel), 0 0 0 3.5px #f2c94c; } }
