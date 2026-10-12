@@ -947,15 +947,19 @@
   ];
   const AUDIO_EXT = /\.(mp3|m4a|aac|wav|ogg|oga|opus|flac|webm|mp4)$/i;
   const MAX_SOUND = 80 * 1024 * 1024;
-  const snd = { playing: null, voice: null, master: null, volume: +store.get('sndVol', 0.6), timer: 0, stopAt: 0, mine: [] };
+  const MAX_BOOST = 1.8;  // full slider = 1.8x the track's own level
+  const snd = { playing: null, voice: null, master: null, volume: +store.get('sndVol', 0.8), timer: 0, stopAt: 0, mine: [] };
 
   function masterOut() {
     unlockAudio();
     if (!audioCtx) return null;
     if (!snd.master) {
       snd.master = audioCtx.createGain();
-      snd.master.gain.value = snd.volume * snd.volume;
-      snd.master.connect(audioCtx.destination);
+      snd.master.gain.value = snd.volume * MAX_BOOST;
+      // Brick-wall limiter so the boosted top of the volume range never distorts.
+      const limiter = audioCtx.createDynamicsCompressor();
+      limiter.threshold.value = -3; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = 0.002; limiter.release.value = 0.25;
+      snd.master.connect(limiter).connect(audioCtx.destination);
     }
     return snd.master;
   }
@@ -1026,7 +1030,7 @@
   function setVolume(v) {
     snd.volume = v;
     store.set('sndVol', v);
-    if (snd.master) snd.master.gain.setTargetAtTime(v * v, audioCtx.currentTime, 0.08);
+    if (snd.master) snd.master.gain.setTargetAtTime(v * MAX_BOOST, audioCtx.currentTime, 0.08);
   }
 
   function renderSoundUi() {
