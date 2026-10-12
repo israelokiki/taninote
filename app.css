@@ -851,3 +851,106 @@ body.editing .flowdoc > .sheet { pointer-events: none; }
 body.editing .flowdoc > .sheet .tbox { pointer-events: auto; }
 .flow mark { background: #ffe14d; color: inherit; }
 .flow ul, .flow ol { padding-left: 1.6em; }
+
+/* ================= Responsive hardening ================= */
+.main-col { grid-template-columns: minmax(0, 1fr); }
+.top-search { min-width: 0; }
+.top-search input { width: 100%; min-width: 0; }
+.topbar { min-width: 0; }
+@media (max-width: 760px) {
+  .topbar { gap: 8px; }
+  .top-actions { gap: 6px; flex: none; }
+  .top-btn { width: 36px; height: 36px; font-size: 18px; }
+  .avatar { width: 36px; height: 36px; font-size: 15px; }
+  .top-search { padding: 0 12px; }
+}
+@media (max-width: 430px) {
+  #themeBtn { display: none; }  /* theme lives in Settings on small phones */
+  .top-search { flex: 1 1 60px; }
+}
+
+/* ================= Phone writing dock ================= */
+.m-only { display: none !important; }
+@media (max-width: 760px) {
+  .m-only { display: inline-grid !important; }
+  .dock-extra.m-only { display: flex !important; }
+  /* Tools move to a dock at the bottom, within thumb reach */
+  #toolbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 12;
+    margin: 0; padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+    flex-wrap: wrap; justify-content: center; align-content: flex-end; gap: 8px;
+    overflow: visible; -webkit-mask-image: none; mask-image: none;
+    background: var(--chrome); -webkit-backdrop-filter: blur(20px) saturate(170%); backdrop-filter: blur(20px) saturate(170%);
+    box-shadow: 0 -1px 0 var(--line), 0 -10px 30px rgb(20 24 50 / 0.08);
+  }
+  #toolbar.scrolls { margin: 0; padding-left: 10px; padding-right: 10px; }
+  #toolbar > .tool-group { order: 1; }
+  #toolbar > #toolGroup { order: 10; }
+  #toolbar > .dock-extra { order: 11; }
+  /* Secondary groups live in the "More" tray, opened from the dock */
+  #toolbar > .tool-group:not(#toolGroup):not(.dock-extra) { display: none; }
+  body.tools-open #toolbar > .tool-group:not(#toolGroup):not(.dock-extra):not(.undo-group) { display: flex; }
+  body.tools-open #toolbar { padding-top: 12px; border-radius: 20px 20px 0 0; }
+  #mMore[aria-expanded="true"] { background: var(--soft); }
+  #mColor .cdot { width: 22px; height: 22px; border-radius: 999px; background: var(--ink, var(--text)); box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.15), 0 0 0 2px var(--panel), 0 0 0 3.5px var(--line-strong); }
+  .vrow { gap: 2px; }
+  .vrow .page-ind { padding: 0 2px; }
+  .stage { padding-bottom: calc(70vh + 80px); }
+  /* Floating panels sit above the dock while writing */
+  #viewer:not([hidden]) ~ .sound-panel { bottom: calc(76px + env(safe-area-inset-bottom)); }
+  #viewer:not([hidden]) ~ .reminder { bottom: calc(76px + env(safe-area-inset-bottom)); }
+  body.viewing .toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
+  /* Text formatting stays a single scrollable row under the top bar */
+  .formatbar { overflow-x: auto; flex-wrap: nowrap; }
+}
+@media (max-width: 760px) {
+  /* Stats as a compact row of three on phones */
+  .dash-side { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .dash-side .stat { flex-direction: column; align-items: flex-start; gap: 8px; min-height: 0; padding: 12px; }
+  .dash-side .stat-icon { width: 32px; height: 32px; font-size: 16px; border-radius: 9px; }
+  .dash-side .stat strong { font-size: 24px; }
+  .dash-side .stat span:not(.stat-icon) { font-size: 11.5px; line-height: 1.25; margin-top: 2px; }
+  .dash-side .today { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) {
+  /* A backdrop-filter would trap the fixed dock inside the top bar, so the bar is solid on phones */
+  .vbar { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--panel); }
+}
+
+/* Recent files: delete beside each row */
+.recent-item { display: flex; align-items: center; gap: 4px; }
+.recent-item .recent-row { flex: 1; min-width: 0; }
+.recent-del { color: var(--muted); flex: none; }
+@media (hover: hover) and (pointer: fine) { .recent-del:hover { color: var(--danger); background: rgb(192 53 46 / 0.08); } }
+@media (max-width: 760px) {
+  .recent-item { align-items: flex-start; }
+  .recent-del { margin-top: 18px; }
+  /* Pencil-only switch shows its label inside the roomy tools tray */
+  body.tools-open #viewer .switch > span:last-child:not(.switch-track) { display: inline; }
+}
+@media (min-width: 761px) and (max-width: 1100px) {
+  /* Tablets: tools wrap onto two tidy rows instead of scrolling sideways */
+  #toolbar, .formatbar { flex-wrap: wrap; overflow: visible; row-gap: 6px; }
+  #toolbar.scrolls { margin-left: 0; margin-right: 0; padding-left: 2px; padding-right: 2px; -webkit-mask-image: none; mask-image: none; }
+}
+@media (min-width: 761px) and (max-width: 1100px) {
+  #viewer .switch > span:last-child:not(.switch-track) { display: inline; }
+}
+@media (max-width: 600px) {
+  /* Phones: documents re-flow with large type so reading and typing are comfortable */
+  .flow { font-size: 34px; line-height: 1.55; padding: 44px 36px 64px; }
+  .flow h1 { font-size: 1.7em; } .flow h2 { font-size: 1.4em; } .flow h3 { font-size: 1.2em; }
+  .flow table { font-size: 0.85em; } .flow pre, .flow code { font-size: 0.82em; } .flow pre.plain { font-size: 0.9em; }
+  .flow .slide-no { font-size: 0.6em; }
+}
+@media (max-width: 760px) {
+  .formatbar { margin-left: -10px; margin-right: -10px; padding-left: 10px; padding-right: 10px; scrollbar-width: none;
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 10px, #000 calc(100% - 32px), transparent);
+    mask-image: linear-gradient(to right, transparent, #000 10px, #000 calc(100% - 32px), transparent); }
+  .formatbar::-webkit-scrollbar { display: none; }
+}
+@media (max-width: 420px) {
+  .card-head h2 { font-size: 19px; white-space: nowrap; }
+  .card-head .mini-select { padding-left: 6px; font-size: 13px; }
+  .card { padding: 16px 14px; }
+}

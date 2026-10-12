@@ -361,7 +361,11 @@
     stats.append(stat('ph-files', pages || '-', 'pages'), stat('ph-highlighter', s.hl || 0, 'highlights'), stat('ph-pen-nib', (s.pen || 0) + (s.notes || 0), 'pen marks and notes'));
     b.append(text, stats);
     b.addEventListener('click', () => openDoc(d.id));
-    li.append(b);
+    const del = el('button', 'icon-btn recent-del', { innerHTML: '<i class="ph ph-trash"></i>', title: 'Delete' });
+    del.setAttribute('aria-label', 'Delete ' + d.name);
+    del.addEventListener('click', () => deleteDoc(d));
+    li.className = 'recent-item';
+    li.append(b, del);
     return li;
   }
 
@@ -510,6 +514,13 @@
     return c;
   }
 
+  async function deleteDoc(d) {
+    if (!await confirmDialog('Delete this file?', `"${d.name}" and all its notes will be removed from this device. This can't be undone.`, 'Delete')) return;
+    await db.del('docs', d.id); await db.del('ink', d.id);
+    for (const p of plan.filter((p) => p.docId === d.id)) { p.docId = null; await db.put('plan', p); }
+    refresh(); toast('Deleted');
+  }
+
   let openMenu = null;
   function closeMenu() { if (openMenu) { openMenu.remove(); openMenu = null; } }
   function cardMenu(anchor, d) {
@@ -535,12 +546,7 @@
     });
     item('ph-calendar-plus', 'Plan a study session', () => sessionDialog(null, d.id));
     if (d.blob) item('ph-download-simple', 'Download original', () => download(d.blob, d.fileName || d.name));
-    item('ph-trash', 'Delete', async () => {
-      if (!await confirmDialog('Delete this file?', `"${d.name}" and all its notes will be removed from this device. This can't be undone.`, 'Delete')) return;
-      await db.del('docs', d.id); await db.del('ink', d.id);
-      for (const p of plan.filter((p) => p.docId === d.id)) { p.docId = null; await db.put('plan', p); }
-      refresh(); toast('Deleted');
-    }, 'danger');
+    item('ph-trash', 'Delete', () => deleteDoc(d), 'danger');
     document.body.append(m);
     const r = anchor.getBoundingClientRect();
     const mw = m.offsetWidth, mh = m.offsetHeight;
@@ -1782,7 +1788,10 @@
   }
   function doUndo() { blurText(); const h = state.undo.pop(); if (!h) return; state.redo.push(h); applySnap(h.key, h.before); updateUndoUi(); }
   function doRedo() { blurText(); const h = state.redo.pop(); if (!h) return; state.undo.push(h); applySnap(h.key, h.after); updateUndoUi(); }
-  function updateUndoUi() { $('#undoBtn').disabled = !state.undo.length; $('#redoBtn').disabled = !state.redo.length; }
+  function updateUndoUi() {
+    $('#undoBtn').disabled = $('#mUndo').disabled = !state.undo.length;
+    $('#redoBtn').disabled = $('#mRedo').disabled = !state.redo.length;
+  }
 
   let saveTimer = null;
   function markDirty() {
@@ -1796,7 +1805,7 @@
     clearTimeout(saveTimer);
     if (!state.ink) return;
     try {
-      state.ink.view = { zoom: state.zoom, scroll: scroller.scrollTop / Math.max(1, scroller.scrollHeight) };
+      state.ink.view = { zoom: state.zoom, ratio: state.zoom / fitZoom(), scroll: scroller.scrollTop / Math.max(1, scroller.scrollHeight) };
       await db.put('ink', state.ink);
       $('#saveStatus').textContent = 'Saved';
     } catch (e) {
@@ -1822,6 +1831,7 @@
     $('#docTitle').textContent = doc.name;
     $('#saveStatus').textContent = '';
     $('#app').hidden = true;
+    document.body.classList.add('viewing');
     $('#viewer').hidden = false;
     if (!history.state || history.state.doc !== id) history.pushState({ doc: id }, '', '#' + id);
     measureBar();
@@ -1829,7 +1839,8 @@
     updateUndoUi();
     const v = state.ink.view;
     // Reopen at the saved zoom, but never wider than this screen (the file may have been last open on a bigger one).
-    state.zoom = v && v.zoom ? Math.min(v.zoom, fitZoom()) : fitZoom();
+    // Zoom is remembered relative to the screen, so a file opened on a phone then a tablet fits both.
+    state.zoom = v && v.ratio ? clamp(fitZoom() * v.ratio, 0.25, 4) : fitZoom();
     stage.style.setProperty('--u', PAPER_U * state.zoom + 'px');
     try {
       await buildSource(doc);
@@ -1951,6 +1962,7 @@
     stage.style.width = '';
     $('#viewer').hidden = true;
     $('#app').hidden = false;
+    document.body.classList.remove('viewing', 'tools-open');
     refresh();
   }
 
@@ -1997,7 +2009,7 @@
     markViewDirty();
   }
   let viewTimer;
-  function markViewDirty() { clearTimeout(viewTimer); viewTimer = setTimeout(() => state.ink && db.put('ink', Object.assign(state.ink, { view: { zoom: state.zoom, scroll: scroller.scrollTop / Math.max(1, scroller.scrollHeight) } })).catch(() => {}), 800); }
+  function markViewDirty() { clearTimeout(viewTimer); viewTimer = setTimeout(() => state.ink && db.put('ink', Object.assign(state.ink, { view: { zoom: state.zoom, ratio: state.zoom / fitZoom(), scroll: scroller.scrollTop / Math.max(1, scroller.scrollHeight) } })).catch(() => {}), 800); }
 
   // Trackpad pinch / ctrl+wheel
   let wheelZoom = null;
@@ -2064,7 +2076,9 @@
     tb.classList.remove('scrolls');
     tb.classList.toggle('scrolls', tb.scrollWidth > tb.clientWidth + 1);
   }
-  addEventListener('resize', () => { if (state.doc) { measureBar(); updatePageInd(); } });
+  // Rotating or resizing can change how documents re-flow (phones use larger type), so re-measure pages
+  let resizeTimer = 0;
+  addEventListener('resize', () => { if (state.doc) { measureBar(); updatePageInd(); clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (state.flow) reflowFlow(); }, 300); } });
 
   // ---------------------------------------------------------------------------
   // Pages
@@ -2259,7 +2273,7 @@
     $('#formatBar').hidden = !on;
     measureBar();
     scroller.scrollTop += document.querySelector('.vbar').offsetHeight - before;  // keep the page still
-    if (on) { $('#undoBtn').disabled = false; $('#redoBtn').disabled = false; updateFormatState(); }
+    if (on) { $('#undoBtn').disabled = $('#mUndo').disabled = false; $('#redoBtn').disabled = $('#mRedo').disabled = false; updateFormatState(); }
     else { flushEdit(); updateUndoUi(); }
   }
 
@@ -2414,6 +2428,7 @@
     nib.classList.toggle('hl', state.tool === 'hl');
     group.style.setProperty('--ink', colored ? set.c : '');
     $('#sizeGroup').style.setProperty('--ink', colored ? set.c : '');
+    $('#mColor').style.setProperty('--ink', colored ? set.c : '');
   }
 
   function renderInks() {
@@ -2510,6 +2525,14 @@
   }
   $('#newNotebook').addEventListener('click', newNotebook);
   $('#newDocument').addEventListener('click', newDocument);
+  // Phone dock: undo/redo in the top bar, colour + More open the tools tray
+  $('#mUndo').addEventListener('click', () => $('#undoBtn').click());
+  $('#mRedo').addEventListener('click', () => $('#redoBtn').click());
+  const setTray = (open) => { document.body.classList.toggle('tools-open', open); $('#mMore').setAttribute('aria-expanded', String(open)); };
+  $('#mMore').addEventListener('click', () => setTray(!document.body.classList.contains('tools-open')));
+  $('#mColor').addEventListener('click', () => setTray(!document.body.classList.contains('tools-open')));
+  scroller.addEventListener('pointerdown', () => setTray(false));
+  document.querySelectorAll('#toolGroup .tool').forEach((b) => b.addEventListener('click', () => setTray(false)));
   // Formatting bar: buttons must not steal the text selection
   $('#formatBar').addEventListener('mousedown', (e) => { if (e.target.closest('button')) e.preventDefault(); });
   document.querySelectorAll('#formatBar .fmt').forEach((b) => b.addEventListener('click', () => exec(b.dataset.cmd)));
