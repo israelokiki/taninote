@@ -1,0 +1,7 @@
+# Local tooling, not part of the app
+.claude/
+.impeccable/
+icons/options/
+.DS_Store
+# Duplicate copy of the soft piano track
+music/*(1).mp3

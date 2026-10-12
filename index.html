@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' data: blob:; media-src 'self' blob: data:; worker-src 'self' blob:; frame-src 'self' about:; child-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; manifest-src 'self'">
+<meta name="referrer" content="no-referrer">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="TaniNote">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#262b4a">
+<meta name="description" content="Open any study file and write on it.">
+<title>TaniNote</title>
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="vendor/phosphor/regular/style.css">
+<link rel="stylesheet" href="vendor/phosphor/fill/style.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<!-- ================= App shell ================= -->
+<div id="app" class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <img src="icons/icon.svg" alt="" width="44" height="44">
+      <span class="brand-name">Tani<br>Note</span>
+    </div>
+    <nav class="nav" aria-label="Sections">
+      <button class="nav-item" data-view="dashboard"><i class="ph ph-squares-four"></i><span>Dashboard</span></button>
+      <button class="nav-item" data-view="files"><i class="ph ph-files"></i><span>My files</span></button>
+      <button class="nav-item" data-view="notebooks"><i class="ph ph-notebook"></i><span>Notebooks</span></button>
+      <button class="nav-item" data-view="plan"><i class="ph ph-calendar-dots"></i><span>Study plan</span></button>
+      <button class="nav-item" data-view="settings"><i class="ph ph-gear-six"></i><span>Settings</span></button>
+    </nav>
+    <div class="side-foot">
+      <div class="side-photo" aria-hidden="true"><img src="images/sidebar-photo.jpg" alt="" width="520" height="420" decoding="async"></div>
+      <div class="storage-mini" id="storageMini"></div>
+      <span class="version">Version 1.5.0</span>
+    </div>
+  </aside>
+
+  <div class="main-col">
+    <header class="topbar">
+      <label class="top-search">
+        <i class="ph ph-magnifying-glass" aria-hidden="true"></i>
+        <input type="search" id="search" placeholder="Search your files" aria-label="Search your files" autocomplete="off">
+      </label>
+      <div class="top-actions">
+        <label class="top-btn" title="Import files"><i class="ph ph-tray-arrow-down"></i><span class="sr">Import files</span><input type="file" id="fileInput" multiple hidden></label>
+        <button class="top-btn sound-btn" id="soundBtn" title="Reading sounds" aria-label="Reading sounds" aria-haspopup="dialog"><i class="ph ph-headphones"></i><span class="eq" aria-hidden="true"><i></i><i></i><i></i></span></button>
+        <button class="top-btn bell" id="bellBtn" title="Study reminders" aria-label="Study reminders"><i class="ph ph-bell"></i><span class="bell-badge" id="bellBadge" hidden></span></button>
+        <button class="top-btn" id="themeBtn" title="Switch theme" aria-label="Switch theme"><i class="ph ph-moon"></i></button>
+        <button class="profile" id="profileBtn" title="Settings">
+          <span class="profile-name" id="profileName">Add your name</span>
+          <i class="ph ph-caret-down" aria-hidden="true"></i>
+          <span class="avatar" id="avatar" aria-hidden="true"></span>
+        </button>
+      </div>
+    </header>
+
+    <main class="panel" id="panel">
+      <!-- Dashboard -->
+      <section class="page" id="view-dashboard" aria-labelledby="heroTitle">
+        <div class="dash">
+          <div class="dash-main">
+            <section class="hero">
+              <div class="hero-text">
+                <h1 id="heroTitle">Hello!</h1>
+                <p id="heroSub">Bring in a study module and start writing on it.</p>
+                <div class="hero-actions">
+                  <label class="btn navy"><i class="ph ph-tray-arrow-down" aria-hidden="true"></i><span>Import a module</span><input type="file" id="heroInput" multiple hidden></label>
+                  <button class="btn ghost" id="continueBtn" hidden><i class="ph ph-arrow-right" aria-hidden="true"></i><span id="continueLabel">Continue</span></button>
+                </div>
+              </div>
+              <svg class="hero-art" viewBox="0 0 320 200" aria-hidden="true">
+                <rect x="40" y="132" width="250" height="16" rx="8" fill="#e0b43c"/>
+                <rect x="70" y="158" width="190" height="14" rx="7" fill="#e0b43c"/>
+                <rect x="20" y="40" width="70" height="12" rx="6" fill="#e0b43c"/>
+                <circle cx="292" cy="44" r="9" fill="#e0b43c"/>
+                <g transform="rotate(-10 150 100)">
+                  <rect x="106" y="26" width="120" height="150" rx="12" fill="#d6d7f3"/>
+                </g>
+                <g transform="rotate(6 170 100)">
+                  <rect x="128" y="20" width="124" height="156" rx="12" fill="#fffaf0"/>
+                  <rect x="146" y="44" width="70" height="8" rx="4" fill="#262b4a"/>
+                  <rect x="140" y="66" width="98" height="20" rx="5" fill="#f2bfc9"/>
+                  <rect x="146" y="72" width="84" height="8" rx="4" fill="#262b4a" opacity=".85"/>
+                  <rect x="146" y="98" width="88" height="7" rx="3.5" fill="#262b4a" opacity=".25"/>
+                  <rect x="146" y="116" width="70" height="7" rx="3.5" fill="#262b4a" opacity=".25"/>
+                  <rect x="146" y="134" width="80" height="7" rx="3.5" fill="#262b4a" opacity=".25"/>
+                </g>
+                <g transform="rotate(38 236 118)">
+                  <rect x="176" y="108" width="110" height="22" rx="7" fill="#262b4a"/>
+                  <rect x="176" y="108" width="24" height="22" rx="6" fill="#f2bfc9"/>
+                  <path d="M286 110l22 9-22 9z" fill="#fffaf0"/>
+                </g>
+              </svg>
+            </section>
+
+            <section class="card recent" aria-labelledby="recentTitle">
+              <header class="card-head">
+                <h2 id="recentTitle">Recent files</h2>
+                <label class="mini-select">
+                  <i class="ph ph-sort-descending" aria-hidden="true"></i>
+                  <select id="recentSort" aria-label="Sort recent files">
+                    <option value="opened">Last opened</option>
+                    <option value="marked">Most marked up</option>
+                  </select>
+                </label>
+              </header>
+              <ol class="recent-list" id="recentList"></ol>
+              <div class="recent-empty" id="recentEmpty" hidden>
+                <p>Nothing here yet. Import a PDF, Word file, slides or ebook and it will show up here.</p>
+              </div>
+            </section>
+          </div>
+
+          <div class="dash-side">
+            <div class="stat cyan">
+              <span class="stat-icon"><i class="ph ph-books"></i></span>
+              <div><strong id="statFiles">0</strong><span>Files in your library</span></div>
+            </div>
+            <div class="stat lilac">
+              <span class="stat-icon"><i class="ph ph-pen-nib"></i></span>
+              <div><strong id="statPages">0</strong><span>Pages written on</span></div>
+            </div>
+            <div class="stat pink">
+              <span class="stat-icon"><i class="ph ph-fire"></i></span>
+              <div><strong id="statStreak">0</strong><span id="statStreakLabel">Day study streak</span></div>
+            </div>
+
+            <section class="today" aria-labelledby="todayTitle">
+              <header class="today-head">
+                <h2 id="todayTitle">Today's study</h2>
+                <button class="today-month" id="todayMonth"><i class="ph ph-calendar-blank" aria-hidden="true"></i><span></span></button>
+              </header>
+              <div class="week" id="week"></div>
+              <ul class="sessions" id="sessions"></ul>
+              <button class="add-session" id="addSessionBtn"><i class="ph ph-plus" aria-hidden="true"></i>Plan a session</button>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <!-- Files / Notebooks -->
+      <section class="page" id="view-files" hidden aria-labelledby="filesTitle">
+        <header class="page-head">
+          <h1 id="filesTitle">My files</h1>
+          <div class="page-actions">
+            <label class="mini-select">
+              <i class="ph ph-sort-descending" aria-hidden="true"></i>
+              <select id="filesSort" aria-label="Sort files">
+                <option value="opened">Last opened</option>
+                <option value="name">Name</option>
+                <option value="added">Date added</option>
+                <option value="marked">Most marked up</option>
+              </select>
+            </label>
+            <button class="btn" id="newNotebook"><i class="ph ph-notebook" aria-hidden="true"></i><span>New notebook</span></button>
+            <label class="btn navy"><i class="ph ph-tray-arrow-down" aria-hidden="true"></i><span>Import</span><input type="file" id="filesInput" multiple hidden></label>
+          </div>
+        </header>
+        <div class="chips" id="chips" role="tablist" aria-label="Filter"></div>
+        <div id="grid" class="grid" aria-live="polite"></div>
+        <div id="empty" class="empty" hidden>
+          <h2>Bring <mark class="swipe">any</mark> study file.</h2>
+          <p>PDFs, Word documents, slides, ebooks, photos of the board. TaniNote opens it and you write straight on top.</p>
+          <label class="dropzone">
+            <i class="ph ph-file-arrow-up" aria-hidden="true"></i>
+            <span><strong>Choose a file</strong> or drop it anywhere</span>
+            <input type="file" id="emptyInput" multiple hidden>
+          </label>
+          <p class="formats">PDF, DOCX, PPTX, EPUB, PNG, JPG, Markdown, HTML, TXT</p>
+        </div>
+        <p class="noresults" id="noResults" hidden>No files match.</p>
+      </section>
+
+      <!-- Study plan -->
+      <section class="page" id="view-plan" hidden aria-labelledby="planTitle">
+        <header class="page-head">
+          <h1 id="planTitle">Study plan</h1>
+          <div class="page-actions">
+            <button class="btn navy" id="planAdd"><i class="ph ph-plus" aria-hidden="true"></i><span>Plan a session</span></button>
+          </div>
+        </header>
+        <div class="plan">
+          <section class="month card">
+            <header class="month-head">
+              <button class="icon-btn" id="monthPrev" aria-label="Previous month"><i class="ph ph-caret-left"></i></button>
+              <h2 id="monthTitle"></h2>
+              <button class="icon-btn" id="monthNext" aria-label="Next month"><i class="ph ph-caret-right"></i></button>
+            </header>
+            <div class="month-grid" id="monthGrid"></div>
+          </section>
+          <section class="agenda card" aria-labelledby="agendaTitle">
+            <h2 id="agendaTitle"></h2>
+            <ul class="sessions big" id="agenda"></ul>
+          </section>
+        </div>
+      </section>
+
+      <!-- Settings -->
+      <section class="page" id="view-settings" hidden aria-labelledby="settingsTitle">
+        <header class="page-head"><h1 id="settingsTitle">Settings</h1></header>
+        <div class="settings">
+          <section class="set-card">
+            <h2>You</h2>
+            <label class="field"><span>Your name</span><input type="text" id="setName" maxlength="40" autocomplete="given-name" placeholder="What should TaniNote call you?"></label>
+            <div class="field"><span>Theme</span>
+              <div class="seg" id="setTheme" role="radiogroup" aria-label="Theme">
+                <button role="radio" data-v="auto">Auto</button><button role="radio" data-v="light">Light</button><button role="radio" data-v="dark">Dark</button>
+              </div>
+            </div>
+          </section>
+          <section class="set-card">
+            <h2>Writing</h2>
+            <div class="field row"><span>Pencil only<small>Only the stylus draws. Fingers scroll and pinch.</small></span>
+              <button class="switch" id="setPenOnly" role="switch" aria-checked="false" aria-label="Pencil only"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+            </div>
+            <label class="field"><span>Paper for new pages</span>
+              <select id="setPaper"><option value="blank">Plain (like Word)</option><option value="lined">Lined</option><option value="grid">Grid</option><option value="dots">Dotted</option></select>
+            </label>
+          </section>
+          <section class="set-card" id="remindCard">
+            <h2>Study reminders</h2>
+            <div class="field row"><span>Remind me to study<small>A notification and a chime when a planned session is due.</small></span>
+              <button class="switch" id="setRemind" role="switch" aria-checked="false" aria-label="Remind me to study"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+            </div>
+            <label class="field"><span>When</span>
+              <select id="setLead">
+                <option value="0">At the start time</option>
+                <option value="5">5 minutes before</option>
+                <option value="10">10 minutes before</option>
+                <option value="15">15 minutes before</option>
+                <option value="30">30 minutes before</option>
+              </select>
+            </label>
+            <div class="field row"><span>Play a sound</span>
+              <button class="switch" id="setSound" role="switch" aria-checked="true" aria-label="Play a sound"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+            </div>
+            <p class="set-note" id="remindStatus"><i class="ph ph-info" aria-hidden="true"></i><span></span></p>
+            <div class="set-actions"><button class="btn" id="testRemind"><i class="ph ph-bell-ringing" aria-hidden="true"></i><span>Try a reminder</span></button></div>
+          </section>
+          <section class="set-card">
+            <h2>Your data</h2>
+            <p class="set-note"><i class="ph ph-lock-simple" aria-hidden="true"></i>Everything stays on this device. TaniNote has no account, sends nothing to a server and loads no outside scripts.</p>
+            <div class="storage" id="storageFull"></div>
+            <div class="set-actions">
+              <button class="btn" id="backupBtn"><i class="ph ph-download-simple" aria-hidden="true"></i><span>Download backup</span></button>
+              <label class="btn"><i class="ph ph-upload-simple" aria-hidden="true"></i><span>Restore backup</span><input type="file" id="restoreInput" accept=".zip,application/zip" hidden></label>
+            </div>
+          </section>
+          <section class="set-card danger-zone">
+            <h2>Start over</h2>
+            <p class="set-note">Deletes every file, note and study session on this device. Download a backup first if you might want them back.</p>
+            <button class="btn danger" id="wipeBtn"><i class="ph ph-trash" aria-hidden="true"></i><span>Delete everything</span></button>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <nav class="tabbar" aria-label="Sections">
+    <button class="tab" data-view="dashboard"><i class="ph ph-squares-four"></i><span>Home</span></button>
+    <button class="tab" data-view="files"><i class="ph ph-files"></i><span>Files</span></button>
+    <button class="tab" data-view="plan"><i class="ph ph-calendar-dots"></i><span>Plan</span></button>
+    <button class="tab" data-view="settings"><i class="ph ph-gear-six"></i><span>Settings</span></button>
+  </nav>
+
+  <div id="dropOverlay" class="drop-overlay" hidden aria-hidden="true">
+    <div class="drop-card"><i class="ph ph-tray-arrow-down"></i><span>Drop to add to TaniNote</span></div>
+  </div>
+</div>
+
+<!-- ================= Viewer ================= -->
+<section id="viewer" class="view" hidden>
+  <div id="scroller" class="scroller">
+    <div id="stage" class="stage"></div>
+  </div>
+
+  <header class="vbar">
+    <div class="vrow">
+      <button class="icon-btn" id="backBtn" aria-label="Back" title="Back"><i class="ph ph-caret-left"></i></button>
+      <button class="doc-title" id="docTitle" title="Rename"></button>
+      <span class="save-status" id="saveStatus" aria-live="polite"></span>
+      <span class="spacer"></span>
+      <span class="page-ind" id="pageInd" aria-live="off"></span>
+      <button class="btn small navy" id="exportBtn"><i class="ph ph-export" aria-hidden="true"></i><span>Export PDF</span></button>
+    </div>
+
+    <div class="toolbar" id="toolbar">
+      <div class="tool-group" role="radiogroup" aria-label="Tools" id="toolGroup">
+        <span class="nib" id="nib" aria-hidden="true"></span>
+        <button class="tool" role="radio" data-tool="scroll" aria-label="Scroll" title="Scroll (V)"><i class="ph ph-hand"></i></button>
+        <button class="tool" role="radio" data-tool="pen" aria-label="Pen" title="Pen (P)"><i class="ph ph-pen-nib"></i></button>
+        <button class="tool" role="radio" data-tool="hl" aria-label="Highlighter" title="Highlighter (H)"><i class="ph ph-highlighter"></i></button>
+        <button class="tool" role="radio" data-tool="eraser" aria-label="Eraser" title="Eraser (E)"><i class="ph ph-eraser"></i></button>
+        <button class="tool" role="radio" data-tool="text" aria-label="Text" title="Text (T)"><i class="ph ph-text-t"></i></button>
+      </div>
+
+      <div class="tool-group inks" id="inks" role="radiogroup" aria-label="Ink colour"></div>
+
+      <div class="tool-group size" id="sizeGroup">
+        <span class="size-dot" id="sizeDot" aria-hidden="true"></span>
+        <input type="range" id="sizeRange" aria-label="Size">
+      </div>
+
+      <div class="tool-group">
+        <button class="icon-btn" id="undoBtn" aria-label="Undo" title="Undo (Ctrl/Cmd Z)"><i class="ph ph-arrow-counter-clockwise"></i></button>
+        <button class="icon-btn" id="redoBtn" aria-label="Redo" title="Redo (Shift Ctrl/Cmd Z)"><i class="ph ph-arrow-clockwise"></i></button>
+      </div>
+
+      <div class="tool-group">
+        <button class="icon-btn" id="zoomOut" aria-label="Zoom out" title="Zoom out"><i class="ph ph-minus"></i></button>
+        <button class="zoom-val" id="zoomVal" title="Fit to width"></button>
+        <button class="icon-btn" id="zoomIn" aria-label="Zoom in" title="Zoom in"><i class="ph ph-plus"></i></button>
+      </div>
+
+      <div class="tool-group">
+        <select id="paperSel" aria-label="Paper for new pages">
+          <option value="blank">Plain</option>
+          <option value="lined">Lined</option>
+          <option value="grid">Grid</option>
+          <option value="dots">Dotted</option>
+        </select>
+        <button class="btn small" id="addPage"><i class="ph ph-plus-square" aria-hidden="true"></i><span>Page</span></button>
+      </div>
+
+      <div class="tool-group">
+        <button class="icon-btn sound-btn" id="vSoundBtn" aria-label="Reading sounds" title="Reading sounds" aria-haspopup="dialog"><i class="ph ph-headphones"></i><span class="eq" aria-hidden="true"><i></i><i></i><i></i></span></button>
+      </div>
+
+      <div class="tool-group">
+        <button class="switch" id="penOnly" role="switch" aria-checked="false" title="Only the stylus draws. Fingers scroll and pinch.">
+          <span class="switch-track"><span class="switch-thumb"></span></span><span>Pencil only</span>
+        </button>
+      </div>
+    </div>
+  </header>
+</section>
+
+<!-- Shared dialog -->
+<dialog id="dialog" class="dialog">
+  <form method="dialog" id="dialogForm">
+    <h2 id="dialogTitle"></h2>
+    <div id="dialogBody"></div>
+    <div class="dialog-actions">
+      <button class="btn" value="cancel" id="dialogCancel" formnovalidate>Cancel</button>
+      <button class="btn navy" value="ok" id="dialogOk">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Reading sounds -->
+<div id="soundPanel" class="sound-panel" role="dialog" aria-labelledby="soundTitle" hidden>
+  <header class="sp-head">
+    <div>
+      <h2 id="soundTitle">Reading sounds</h2>
+      <p>Relaxing music to help you settle in and focus.</p>
+    </div>
+    <button class="icon-btn" id="soundClose" aria-label="Close"><i class="ph ph-x"></i></button>
+  </header>
+  <div class="sound-grid" id="soundGrid"></div>
+  <div class="sp-row">
+    <i class="ph ph-speaker-low" aria-hidden="true"></i>
+    <input type="range" id="soundVol" min="0" max="1" step="0.01" aria-label="Volume">
+    <i class="ph ph-speaker-high" aria-hidden="true"></i>
+  </div>
+  <div class="sp-row timer">
+    <span>Stop after</span>
+    <div class="seg small" id="soundTimer" role="radiogroup" aria-label="Stop after">
+      <button role="radio" data-m="0">Never</button><button role="radio" data-m="15">15m</button><button role="radio" data-m="30">30m</button><button role="radio" data-m="60">1h</button>
+    </div>
+  </div>
+  <p class="sp-left" id="soundLeft"></p>
+  <div class="sp-mine">
+    <div class="sp-mine-head">
+      <h3>Your sounds</h3>
+      <label class="btn small"><i class="ph ph-plus" aria-hidden="true"></i><span>Import</span><input type="file" id="soundInput" accept="audio/*,.mp3,.m4a,.aac,.wav,.ogg,.oga,.opus,.flac,.webm" multiple hidden></label>
+    </div>
+    <ul class="my-sounds" id="mySounds"></ul>
+  </div>
+</div>
+
+<!-- Study reminder -->
+<div id="reminder" class="reminder" role="alertdialog" aria-labelledby="remTitle" aria-describedby="remBody" hidden>
+  <span class="rem-icon" aria-hidden="true"><i class="ph-fill ph-bell-ringing"></i></span>
+  <div class="rem-text">
+    <strong id="remTitle"></strong>
+    <p id="remBody"></p>
+    <div class="rem-actions">
+      <button class="btn small rem-open" id="remOpen"><i class="ph ph-book-open" aria-hidden="true"></i><span>Open file</span></button>
+      <button class="btn small rem-ghost" id="remSnooze"><span>Snooze 10 min</span></button>
+      <button class="btn small rem-ghost" id="remDone"><span>Mark done</span></button>
+    </div>
+  </div>
+  <button class="rem-close" id="remClose" aria-label="Dismiss reminder"><i class="ph ph-x"></i></button>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script src="vendor/pdf.min.js"></script>
+<script src="vendor/pdf-lib.min.js"></script>
+<script src="vendor/mammoth.browser.min.js"></script>
+<script src="vendor/jszip.min.js"></script>
+<script src="vendor/marked.min.js"></script>
+<script src="vendor/purify.min.js"></script>
+<script src="vendor/html2canvas.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
