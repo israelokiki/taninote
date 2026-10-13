@@ -721,7 +721,11 @@
         .map((s) => ({ t: s.t, c: s.c, w: clamp(s.w, 0, 1), pts: s.pts.filter((q) => Array.isArray(q) && q.length >= 2 && q.every((v) => typeof v === 'number' && isFinite(v))).map((q) => [q[0], q[1], q[2] == null ? 0.5 : q[2]]) }))
         .filter((s) => s.pts.length);
       const texts = (Array.isArray(p.texts) ? p.texts : []).filter((t) => t && typeof t.text === 'string' && isFinite(t.x) && isFinite(t.y) && /^#[0-9a-f]{6}$/i.test(t.c))
-        .map((t) => { const o = { x: clamp(t.x, 0, 1), y: Math.max(0, t.y), text: t.text.slice(0, 5000), size: clamp(+t.size || 18, 8, 80), c: t.c }; if (typeof t.ff === 'string') { o.ff = t.ff.slice(0, 300).replace(/[;{}<>]/g, ''); o.lh = clamp(+t.lh || 1.5, 1, 3); o.fw = clamp(+t.fw || 400, 100, 900); if (t.ti) o.ti = clamp(+t.ti || 0, 0, 1); } return o; });
+        .map((t) => { const o = { x: clamp(t.x, 0, 1), y: Math.max(0, t.y), text: t.text.slice(0, 5000), size: clamp(+t.size || 18, 8, 80), c: t.c }; if (typeof t.ff === 'string') { o.ff = t.ff.slice(0, 300).replace(/[;{}<>]/g, ''); o.lh = clamp(+t.lh || 1.5, 1, 3); o.fw = clamp(+t.fw || 400, 100, 900); if (t.ti) o.ti = clamp(+t.ti || 0, 0, 1); }
+          if (t.it) o.it = true; if (t.ul) o.ul = true; if (t.st) o.st = true;
+          if (/^#[0-9a-f]{6}$/i.test(t.bg || '')) o.bg = t.bg; if (/^#[0-9a-f]{6}$/i.test(t.cbg || '')) o.cbg = t.cbg;
+          if (isFinite(+t.rw) && +t.rw > 0) o.rw = clamp(+t.rw, 0, 1);
+          if (t.cover && ['x', 'y', 'w', 'h'].every((k) => isFinite(+t.cover[k]))) o.cover = { x: clamp(+t.cover.x, 0, 1), y: Math.max(0, +t.cover.y), w: clamp(+t.cover.w, 0, 1), h: clamp(+t.cover.h, 0, 1) }; return o; });
       pages[k] = { strokes, texts };
     }
     const extra = (Array.isArray(x.extra) ? x.extra : []).slice(0, 2000).map((e) => ({ paper: ['lined', 'grid', 'dots', 'blank'].includes(e && e.paper) ? e.paper : 'blank' }));
@@ -1425,6 +1429,7 @@
       if (token !== s.token) return;
       if (s.base) s.base.replaceWith(c); else s.wrap.prepend(c);
       s.base = c; s.baseW = pw;
+      if (!s.lines) pdfLines(s);  // read the page text now so taps can match it instantly
       s.wrap.classList.remove('loading');
     } catch (e) {
       if (e && e.name === 'RenderingCancelledException') return;
@@ -1436,7 +1441,7 @@
   // Ink drawing
   // ---------------------------------------------------------------------------
   function strokeStyle(ctx, st) {
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.lineCap = st.snap ? 'butt' : 'round'; ctx.lineJoin = 'round';
     ctx.strokeStyle = st.c; ctx.fillStyle = st.c;
     ctx.globalCompositeOperation = st.t === 'hl' ? 'darken' : 'source-over';
   }
@@ -1493,18 +1498,29 @@
     const pg = pageData(s.key);
     if (!pg) return;
     for (const t of pg.texts) {
-      if (!t.text.trim()) continue;
+      if (!t.text.trim() && !t.cover) continue;
       const fs = t.size / BASE * W;
       const pad = t.ff ? 0 : fs * 0.25;  // notes matched to the page have no inner padding
       ctx.save();
       ctx.globalCompositeOperation = 'source-over';
-      ctx.font = `${t.fw || 400} ${fs}px ${t.ff || UI_FONT}`;
-      ctx.fillStyle = t.c; ctx.textBaseline = 'middle';
-      const maxW = (textRight(s) - t.x) * W - pad * 2;
+      // An edited PDF line first hides the original words
+      if (t.cover) { ctx.fillStyle = t.cbg || '#ffffff'; ctx.fillRect(t.cover.x * W, t.cover.y * W, t.cover.w * W, t.cover.h * W); }
+      ctx.font = `${t.it ? 'italic ' : ''}${t.fw || 400} ${fs}px ${t.ff || UI_FONT}`;
+      ctx.textBaseline = 'middle';
+      const maxW = ((t.rw || textRight(s)) - t.x) * W - pad * 2;
       const lh = fs * (t.lh || 1.3);
       const top = t.y * W + (t.ff ? 0 : fs * 0.1);
       const indent = (t.ti || 0) * W;
-      wrapLines(ctx, t.text, maxW, indent).forEach((line, i) => ctx.fillText(line, t.x * W + pad + (i === 0 ? indent : 0), top + lh / 2 + i * lh));
+      wrapLines(ctx, t.text, maxW, indent).forEach((line, i) => {
+        const x = t.x * W + pad + (i === 0 ? indent : 0), y = top + lh / 2 + i * lh;
+        const w = ctx.measureText(line).width;
+        if (t.bg) { ctx.fillStyle = t.bg; ctx.fillRect(x, y - lh / 2, w, lh); }
+        ctx.fillStyle = t.c;
+        ctx.fillText(line, x, y);
+        const th = Math.max(1, fs / 14);
+        if (t.ul) ctx.fillRect(x, y + fs * 0.42, w, th);
+        if (t.st) ctx.fillRect(x, y + fs * 0.02, w, th);
+      });
       ctx.restore();
     }
   }
@@ -1539,7 +1555,7 @@
     d.style.top = (t.y / s.aspect) * 100 + '%';
     d.style.fontSize = t.size * state.zoom + 'px';
     d.style.color = t.c;
-    d.style.maxWidth = Math.max(4, (textRight(s) - t.x) * 100) + '%';
+    d.style.maxWidth = Math.max(4, ((t.rw || textRight(s)) - t.x) * 100) + '%';
     if (t.ff) {
       d.classList.add('matched');
       d.style.fontFamily = t.ff;
@@ -1548,6 +1564,153 @@
       d.style.textIndent = t.ti ? (t.ti * BASE * state.zoom) + 'px' : '';
       if (t.ti) d.style.width = d.style.maxWidth;  // a full-width box so wrapped lines return to the margin
     }
+    d.style.fontStyle = t.it ? 'italic' : '';
+    d.style.textDecoration = [t.ul ? 'underline' : '', t.st ? 'line-through' : ''].filter(Boolean).join(' ');
+    // Editing an existing PDF line: the box covers the original words with the page's own colour
+    if (t.cover) {
+      d.classList.add('replace');
+      d.style.background = t.bg || t.cbg || '#ffffff';
+      d.style.minWidth = (t.cover.w * BASE * state.zoom) + 'px';
+      d.style.minHeight = (t.cover.h * BASE * state.zoom) + 'px';
+    } else {
+      d.style.background = t.bg || '';
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // PDF text: positions and fonts of the page's own text, used to match and edit it
+  // ---------------------------------------------------------------------------
+  function pdfFontCss(name, family) {
+    const n = ((name || '') + ' ' + (family || '')).toLowerCase();
+    let ff;
+    if (/courier|mono|consol|menlo/.test(n)) ff = '"Courier New", Courier, monospace';
+    else if (/calibri|carlito/.test(n)) ff = 'Calibri, Carlito, "Segoe UI", Arial, sans-serif';
+    else if (/times|roman|georgia|garamond|minion|cambria|palatino|book|serif/.test(n) && !/sans/.test(n)) ff = '"Times New Roman", Times, Georgia, serif';
+    else ff = 'Helvetica, Arial, "Segoe UI", sans-serif';
+    return { ff, fw: /bold|black|heavy|semibold|demi/.test(n) ? 700 : 400, it: /italic|oblique/.test(n) };
+  }
+
+  // Read the page's text once: lines with their box, baseline, size and font (all as fractions of page width)
+  async function pdfLines(s) {
+    if (s.lines) return s.lines;
+    if (s.linesLoading) return s.linesLoading;
+    s.linesLoading = (async () => {
+      const page = await state.pdf.getPage(s.n);
+      const vp = page.getViewport({ scale: 1 });
+      const tc = await page.getTextContent();
+      const W = vp.width, items = [];
+      for (const it of tc.items) {
+        if (!it.str || !it.str.trim()) continue;
+        const tx = pdfjsLib.Util.transform(vp.transform, it.transform);
+        const size = Math.hypot(tx[2], tx[3]);
+        if (!size || Math.abs(tx[1]) > size * 0.05) continue;  // skip rotated text
+        const style = tc.styles[it.fontName] || {};
+        let real = '';
+        try { if (page.commonObjs.has(it.fontName)) real = (page.commonObjs.get(it.fontName) || {}).name || ''; } catch { /* font not loaded */ }
+        const asc = style.ascent || 0.8, desc = style.descent || -0.2;
+        items.push({ str: it.str, x: tx[4], w: it.width, base: tx[5], top: tx[5] - size * asc, bottom: tx[5] - size * desc, size, font: pdfFontCss(real, style.fontFamily) });
+      }
+      items.sort((a, b) => a.base - b.base || a.x - b.x);
+      const lines = [];
+      for (const it of items) {
+        const L = lines.find((l) => Math.abs(l.base - it.base) < it.size * 0.4 && it.x < l.right + it.size * 4 && it.x + it.w > l.left - it.size * 4);
+        if (L) {
+          L.items.push(it); L.left = Math.min(L.left, it.x); L.right = Math.max(L.right, it.x + it.w);
+          L.top = Math.min(L.top, it.top); L.bottom = Math.max(L.bottom, it.bottom); L.size = Math.max(L.size, it.size);
+        } else lines.push({ items: [it], left: it.x, right: it.x + it.w, top: it.top, bottom: it.bottom, base: it.base, size: it.size, font: it.font });
+      }
+      for (const L of lines) {
+        L.items.sort((a, b) => a.x - b.x);
+        let text = '';
+        L.items.forEach((it, i) => { const prev = L.items[i - 1]; if (prev && it.x - (prev.x + prev.w) > it.size * 0.15 && !/\s$/.test(text)) text += ' '; text += it.str; });
+        L.text = text.replace(/\s+/g, ' ');
+        for (const k of ['left', 'right', 'top', 'bottom', 'base', 'size']) L[k] /= W;
+      }
+      lines.sort((a, b) => a.base - b.base);
+      // Typical line spacing on this page (for stepping down onto new lines)
+      const gaps = [];
+      for (let i = 1; i < lines.length; i++) { const g = lines[i].base - lines[i - 1].base; if (g > lines[i].size * 0.9 && g < lines[i].size * 2.5) gaps.push(g / lines[i].size); }
+      gaps.sort((a, b) => a - b);
+      s.lineRatio = gaps.length ? clamp(gaps[Math.floor(gaps.length / 2)], 1.05, 2.2) : 1.25;
+      s.colRight = lines.length ? Math.min(0.98, Math.max(...lines.map((l) => l.right)) + 0.01) : 0.98;
+      s.lines = lines;
+      return lines;
+    })().catch(() => (s.lines = []));
+    return s.linesLoading;
+  }
+
+  const lineAt = (s, px, py) => (s.lines || []).find((l) => py >= l.top - l.size * 0.15 && py <= l.bottom + l.size * 0.15 && px >= l.left - l.size * 0.2 && px <= l.right + l.size * 0.2);
+
+  // New note on a PDF: borrow the nearest line's font and size and sit on the page's line rhythm
+  function matchPdfLine(s, px, py) {
+    const lines = s.lines;
+    if (!lines || !lines.length) return null;
+    let near = null, best = Infinity;
+    for (const l of lines) { const d = py < l.top ? l.top - py : py > l.bottom ? py - l.bottom : 0; const dx = px < l.left ? (l.left - px) * 0.3 : 0; if (d + dx < best) { best = d + dx; near = l; } }
+    if (!near) return null;
+    const size = near.size, lh = s.lineRatio || 1.25;
+    const lineH = size * lh;
+    // Step whole lines down from the nearest line when tapping in empty space below it
+    const steps = py > near.bottom + size * 0.2 ? Math.max(1, Math.round((py - near.base) / lineH)) : 0;
+    const base = near.base + steps * lineH;
+    let x = px, ti = 0;
+    if (!steps && px > near.right) { x = near.left; ti = near.right + size * 0.28 - near.left; }  // continue after the last word
+    else if (Math.abs(px - near.left) < size * 3) x = near.left;  // line up with the text's left edge
+    return {
+      x, ti: +ti.toFixed(4), y: base - size * 0.35 - (lineH / 2),
+      size: size * BASE, ff: near.font.ff, fw: near.font.fw, it: near.font.it, lh, rw: s.colRight,
+    };
+  }
+
+  // A roughly horizontal highlighter stroke over PDF text becomes a clean band sized to that line
+  function snapHighlight(s, st) {
+    const xs = st.pts.map((p) => p[0]), ys = st.pts.map((p) => p[1]);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const mid = (y0 + y1) / 2;
+    const L = (s.lines || []).find((l) => mid >= l.top - l.size * 0.3 && mid <= l.bottom + l.size * 0.3 && x1 > l.left && x0 < l.right);
+    if (!L || (y1 - y0) > L.size * 1.6 || (x1 - x0) < L.size * 0.6) return;
+    const a = Math.max(x0, L.left), b = Math.min(x1, L.right);
+    const cy = (L.top + L.bottom) / 2;
+    st.pts = [[a, cy, 0.5], [b, cy, 0.5]];
+    st.w = (L.bottom - L.top) * 1.1;
+    st.snap = 1;
+  }
+
+  // Sample the page colour around a line so the editing patch blends in
+  function pageColorAround(s, L) {
+    const c = s.base;
+    if (!c || !c.width) return '#ffffff';
+    try {
+      const ctx = c.getContext('2d');
+      const sx = c.width, pts = [[L.left - L.size * 0.4, L.top], [L.right + L.size * 0.4, L.top], [L.left - L.size * 0.4, L.bottom], [L.right + L.size * 0.4, L.bottom]];
+      const cols = pts.map(([x, y]) => ctx.getImageData(clamp(Math.round(x * sx), 0, sx - 1), clamp(Math.round(y * sx), 0, c.height - 1), 1, 1).data)
+        .sort((a, b) => (b[0] + b[1] + b[2]) - (a[0] + a[1] + a[2]));
+      const p = cols[1] || cols[0];
+      return '#' + [p[0], p[1], p[2]].map((v) => v.toString(16).padStart(2, '0')).join('');
+    } catch { return '#ffffff'; }
+  }
+
+  // Click on a PDF line with the text tool: turn it into an editable line in the same font
+  function editPdfLine(s, L, clientX) {
+    const before = snap(s.key);
+    const lh = 1.2;
+    const t = {
+      x: L.left, y: L.top - L.size * 0.08, text: L.text, size: L.size * BASE, c: '#1d1d1f', ff: L.font.ff, fw: L.font.fw, it: L.font.it, lh,
+      rw: Math.min(0.99, Math.max(L.right + L.size * 2, s.colRight || 0.98)),
+      cover: { x: L.left - L.size * 0.08, y: L.top - L.size * 0.12, w: (L.right - L.left) + L.size * 0.16, h: (L.bottom - L.top) + L.size * 0.24 },
+      cbg: pageColorAround(s, L),
+    };
+    t.x = t.cover.x + L.size * 0.08;
+    pageData(s.key, true).texts.push(t);
+    const d = textBox(s, t);
+    d._before = before;
+    s.texts.append(d);
+    d.focus();
+    // Put the cursor roughly where the line was clicked
+    const r = s.wrap.getBoundingClientRect();
+    const frac = clamp(((clientX - r.left) / r.width - L.left) / Math.max(0.001, L.right - L.left), 0, 1);
+    const tn = d.firstChild;
+    if (tn && tn.nodeType === 3) { const rg = document.createRange(); rg.setStart(tn, Math.round(frac * tn.length)); rg.collapse(true); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(rg); }
   }
   function textBox(s, t) {
     const d = el('div', 'tbox');
@@ -1558,11 +1721,11 @@
     d.innerText = t.text;
     d._item = t; d._before = null;
     placeText(d, s, t);
-    d.addEventListener('focus', () => { if (d._before == null) d._before = snap(s.key); });
+    d.addEventListener('focus', () => { if (d._before == null) d._before = snap(s.key); state.lastBox = d; updateBoxFormatState(); });
     d.addEventListener('input', () => { t.text = d.innerText.replace(/\n$/, ''); markDirty(); });
     d.addEventListener('keydown', (e) => { if (e.key === 'Escape') d.blur(); e.stopPropagation(); });
     d.addEventListener('blur', () => {
-      if (!t.text.trim()) { const pg = pageData(s.key); if (pg) pg.texts = pg.texts.filter((x) => x !== t); d.remove(); }
+      if (!t.text.trim() && !t.cover) { const pg = pageData(s.key); if (pg) pg.texts = pg.texts.filter((x) => x !== t); d.remove(); }
       if (d._before != null) commit(s.key, d._before);
       d._before = null;
     });
@@ -1621,7 +1784,7 @@
     const r = s.wrap.getBoundingClientRect();
     const set = state.settings.text;
     let t = { x: clamp((clientX - r.left) / r.width, 0, 0.9), y: Math.max(0, (clientY - r.top) / r.width - set.w * 0.75 / BASE), text: '', size: set.w, c: set.c };
-    const m = matchDocLine(s, clientX, clientY);
+    const m = s.kind === 'pdf' ? matchPdfLine(s, (clientX - r.left) / r.width, (clientY - r.top) / r.width) : matchDocLine(s, clientX, clientY);
     if (m) {
       t = Object.assign(t, m, { x: clamp(m.x, 0, 0.9), y: Math.max(0, m.y) });
     } else if (s.kind === 'blank') {
@@ -1650,6 +1813,14 @@
       return;
     }
     if (tapState.wasEditing) return;  // the tap just finished the note being typed
+    // PDF text not read yet: read it first so the note matches the page
+    if (s.kind === 'pdf' && !s.lines) { const x = e.clientX, y = e.clientY; pdfLines(s).then(() => onClick(s, { target: s.wrap, clientX: x, clientY: y })); return; }
+    // Text tool on a PDF line: edit that line in place
+    if (state.tool === 'text' && s.kind === 'pdf' && s.lines) {
+      const r = s.wrap.getBoundingClientRect();
+      const L = lineAt(s, (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.width);
+      if (L) { editPdfLine(s, L, e.clientX); return; }
+    }
     createTextAt(s, e.clientX, e.clientY);
   }
   function blurText() { const a = document.activeElement; if (a && a.classList && a.classList.contains('tbox')) a.blur(); }
@@ -1723,9 +1894,13 @@
     if (tap) {
       redrawInk(s);
       if (editableDoc()) { setTool('text'); placeCaret(e.clientX, e.clientY); }
-      else if (!a.wasEditing) createTextAt(s, e.clientX, e.clientY);
+      else if (!a.wasEditing) {
+        if (s.kind === 'pdf' && !s.lines) { const x = e.clientX, y = e.clientY; pdfLines(s).then(() => createTextAt(s, x, y)); }
+        else createTextAt(s, e.clientX, e.clientY);
+      }
       return;
     }
+    if (a.stroke && a.stroke.t === 'hl' && s.kind === 'pdf' && s.lines && !cancelled) snapHighlight(s, a.stroke);
     if (a.stroke && !(cancelled && a.stroke.pts.length < 3)) {
       pageData(s.key, true).strokes.push(a.stroke);
     }
@@ -2328,7 +2503,55 @@
     c.focus({ preventScroll: true });
     if (savedRange && c.contains(savedRange.startContainer)) { const s = getSelection(); s.removeAllRanges(); s.addRange(savedRange); }
   }
+  // ---- Formatting notes on PDFs, images and notebooks (whole-note styles) ----
+  const boxFormatting = () => document.body.classList.contains('box-format');
+  function setBoxFormatting(on) {
+    on = !!on;
+    if (on === boxFormatting()) return;
+    const before = document.querySelector('.vbar').offsetHeight;
+    document.body.classList.toggle('box-format', on);
+    $('#formatBar').classList.toggle('box', on);
+    if (!isEditing()) $('#formatBar').hidden = !on;
+    measureBar();
+    scroller.scrollTop += document.querySelector('.vbar').offsetHeight - before;
+    updateBoxFormatState();
+  }
+  function activeBox() {
+    const d = state.lastBox;
+    if (!d || !d.isConnected) return null;
+    const s = state.sheets.find((x) => x.texts.contains(d));
+    return s ? { d, s, t: d._item } : null;
+  }
+  function applyBox(cmd, val) {
+    const b = activeBox();
+    if (!b) { toast('Tap a note or a line of text first, then format it.'); return; }
+    const { d, s, t } = b;
+    const before = snap(s.key);
+    if (cmd === 'bold') t.fw = (t.fw || 400) >= 600 ? 400 : 700;
+    else if (cmd === 'italic') t.it = !t.it;
+    else if (cmd === 'underline') t.ul = !t.ul;
+    else if (cmd === 'strikeThrough') t.st = !t.st;
+    else if (cmd === 'foreColor') t.c = val;
+    else if (cmd === 'hiliteColor' || cmd === 'backColor') t.bg = val === 'transparent' ? '' : val;
+    else if (cmd === 'size') t.size = val;
+    else if (cmd === 'removeFormat') { t.fw = 400; t.it = t.ul = t.st = false; t.bg = ''; }
+    else return;
+    placeText(d, s, t);
+    commit(s.key, before);
+    if (d._before != null) d._before = snap(s.key);
+    d.focus({ preventScroll: true });
+    updateBoxFormatState();
+  }
+  function updateBoxFormatState() {
+    if (!boxFormatting()) return;
+    const b = activeBox();
+    const t = b ? b.t : {};
+    const on = { bold: (t.fw || 400) >= 600, italic: !!t.it, underline: !!t.ul, strikeThrough: !!t.st };
+    document.querySelectorAll('#formatBar .fmt').forEach((x) => x.setAttribute('aria-pressed', String(!!on[x.dataset.cmd])));
+  }
+
   function exec(cmd, val) {
+    if (!isEditing()) { applyBox(cmd, val); return; }
     restoreSel();
     document.execCommand('styleWithCSS', false, cmd === 'hiliteColor' || cmd === 'foreColor' || cmd === 'backColor');
     let ok = document.execCommand(cmd, false, val);
@@ -2340,6 +2563,7 @@
     updateFormatState();
   }
   function setFontSize(px) {
+    if (!isEditing()) { applyBox('size', px); return; }
     restoreSel();
     document.execCommand('styleWithCSS', false, false);
     document.execCommand('fontSize', false, '7');
@@ -2414,6 +2638,7 @@
     renderSize();
     moveNib();
     setEditing(tool === 'text' && editableDoc());
+    setBoxFormatting(tool === 'text' && !!state.doc && !editableDoc());
   }
 
   function moveNib() {
@@ -2653,6 +2878,8 @@
   history.replaceState(null, '', location.pathname);
   refresh().then(() => { if (launchSession && ID_RE.test(launchSession)) openSessionFile(launchSession); if (REM.on) loadRingtone(); });
   if (!window.pdfjsLib || !window.PDFLib) toast('Some file readers didn\'t load. Reload TaniNote to try again.', 6000);
+  // Test hook for the local preview only
+  if (location.hostname === 'localhost') window.__tn = { state, pdfLines, matchPdfLine, lineAt, createTextAt, editPdfLine, snapHighlight, inkCanvas };
   // Offline support: cache the app so it opens without a connection.
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => { /* offline mode unavailable */ }));

@@ -966,3 +966,8 @@ body.editing .flowdoc > .sheet .tbox { pointer-events: auto; }
 .swatch[aria-checked="true"] span { transform: none; box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.12), 0 0 0 2px var(--panel), 0 0 0 3.5px var(--c); }
 :root[data-theme="dark"] .hl-swatches button[aria-checked="true"] { box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.1), 0 0 0 2px var(--panel), 0 0 0 3.5px #f2c94c; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .hl-swatches button[aria-checked="true"] { box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.1), 0 0 0 2px var(--panel), 0 0 0 3.5px #f2c94c; } }
+
+/* Formatting bar for notes on PDFs, images and notebooks: whole-note styles only */
+.formatbar.box .flow-only { display: none; }
+.tbox.replace { border-radius: 2px; }
+.tbox.replace:focus { box-shadow: 0 0 0 1.5px rgb(34 87 214 / 0.55) !important; }
