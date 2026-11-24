@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="robots" content="noindex">
+<title>Find my TaniNote notes</title>
+<link rel="icon" href="icons/favicon-32.png">
+<style>
+  :root { --bg: #f4f1e8; --panel: #fff; --text: #232744; --muted: #5d6384; --line: #e3dfd2; --primary: #262b4a; --primary-ink: #fff; --ok: #1f7a4d; --warn: #9a5b00; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #15182b; --panel: #1f2340; --text: #eceef8; --muted: #a6abca; --line: #343a60; --primary: #f2c94c; --primary-ink: #1b1e36; --ok: #6fd39d; --warn: #f2c94c; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 560px; margin: 0 auto; padding: 32px 16px 48px; display: grid; gap: 16px; }
+  h1 { font-size: 28px; line-height: 1.15; margin: 0; letter-spacing: -0.01em; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 20px; display: grid; gap: 12px; }
+  .muted { color: var(--muted); margin: 0; }
+  p { margin: 0; }
+  .big { font-size: 20px; font-weight: 700; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); }
+  button, .btn { appearance: none; border: 0; border-radius: 14px; min-height: 52px; padding: 0 20px; font: inherit; font-weight: 700; background: var(--primary); color: var(--primary-ink); text-decoration: none; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; width: 100%; }
+  button.second, .btn.second { background: transparent; color: var(--text); border: 1.5px solid var(--line); }
+  button:disabled { opacity: 0.6; }
+  ul { margin: 0; padding-left: 20px; } li { overflow-wrap: anywhere; }
+  ol { margin: 0; padding-left: 22px; display: grid; gap: 6px; }
+  .links { display: grid; gap: 10px; }
+  code { font-size: 15px; overflow-wrap: anywhere; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Find my TaniNote notes</h1>
+  <p class="muted">This page looks for TaniNote notes saved in this browser at this address. Nothing is changed or deleted.</p>
+
+  <section class="card" id="status">
+    <p class="big">Looking…</p>
+  </section>
+
+  <section class="card" id="found" hidden>
+    <p class="big ok" id="foundTitle"></p>
+    <ul id="foundList"></ul>
+    <button id="saveBtn">Save all my notes</button>
+    <button id="shareBtn" class="second" hidden>Send the backup file (WhatsApp, email…)</button>
+    <p class="muted" id="saveMsg"></p>
+    <div id="next" hidden>
+      <p class="big">Next: put them in the new TaniNote</p>
+      <ol>
+        <li>Open <a href="https://taninote.vercel.app">taninote.vercel.app</a>.</li>
+        <li>Go to <b>Settings</b>, then <b>Restore backup</b>.</li>
+        <li>Choose the file you just saved (it's in your <b>Downloads</b>).</li>
+        <li>Then create an account in Settings so your notes are backed up online.</li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="card" id="none" hidden>
+    <p class="big warn">No TaniNote notes here</p>
+    <p class="muted" id="noneWhere"></p>
+    <p>Try the same thing at the other TaniNote addresses, and in any other browser on this device (for example Samsung Internet):</p>
+    <div class="links" id="otherLinks"></div>
+    <p class="muted">Do you have a TaniNote icon on your home screen? Open TaniNote from that icon, then go to <b>Settings → Download backup</b>.</p>
+  </section>
+</main>
+<script src="vendor/jszip.min.js"></script>
+<script src="rescue.js"></script>
+</body>
+</html>
