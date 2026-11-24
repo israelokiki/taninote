@@ -3383,6 +3383,9 @@
   const resetToken = (location.hash.match(/^#reset=([A-Za-z0-9_-]{40,60})$/) || [])[1];
   history.replaceState(null, '', location.pathname);
   refresh().then(() => { if (launchSession && ID_RE.test(launchSession)) openSessionFile(launchSession); if (REM.on) loadRingtone(); initCloud().then(() => { if (resetToken) { showView('settings'); resetPassword(resetToken); } }); });
+  // Ask the browser to keep TaniNote's storage even when the device runs low on space,
+  // so files are never cleared automatically. Installed (home screen) apps are usually granted this.
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persisted().then((p) => p || navigator.storage.persist()).catch(() => {});
   if (!window.pdfjsLib || !window.PDFLib) toast('Some file readers didn\'t load. Reload TaniNote to try again.', 6000);
   // Test hook for the local preview only
   if (location.hostname === 'localhost') window.__tn = { state, pdfLines, matchPdfLine, lineAt, createTextAt, editPdfLine, snapHighlight, inkCanvas };
