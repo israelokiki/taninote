@@ -83,10 +83,12 @@
   const db = (() => {
     let opening;
     const open = () => opening || (opening = new Promise((res, rej) => {
-      const r = indexedDB.open('nota', 3);
+      const r = indexedDB.open('nota', 4);
       r.onupgradeneeded = () => {
         const d = r.result;
         for (const n of ['docs', 'ink', 'plan', 'sounds']) if (!d.objectStoreNames.contains(n)) d.createObjectStore(n, { keyPath: 'id' });
+        // Changes waiting to go to the cloud: one entry per record, the latest change wins.
+        if (!d.objectStoreNames.contains('outbox')) d.createObjectStore('outbox', { keyPath: 'k' });
       };
       r.onblocked = () => toast('Close other TaniNote tabs so it can update its storage.', 6000);
       r.onsuccess = () => {
@@ -107,13 +109,28 @@
         tx.onabort = () => rej(tx.error || new Error('Storage aborted'));
       });
     }
-    return {
+    // Every local change to a synced store is stamped (_m) and, when signed in, queued for the cloud.
+    // Changes that came from the cloud pass { remote: true } so they are not sent back.
+    const SYNCED = new Set(['docs', 'ink', 'plan', 'sounds']);
+    const api = {
+      onChange: null,
       get: (n, id) => run(n, 'readonly', (s) => s.get(id)),
-      put: (n, v) => run(n, 'readwrite', (s) => s.put(v)),
-      del: (n, id) => run(n, 'readwrite', (s) => s.delete(id)),
+      async put(n, v, opts) {
+        const local = SYNCED.has(n) && !(opts && opts.remote);
+        if (local) v._m = Math.max(Date.now(), (v._m || 0) + 1);
+        const r = await run(n, 'readwrite', (s) => s.put(v));
+        if (local && api.onChange) api.onChange(n, v.id);
+        return r;
+      },
+      async del(n, id, opts) {
+        const r = await run(n, 'readwrite', (s) => s.delete(id));
+        if (SYNCED.has(n) && !(opts && opts.remote) && api.onChange) api.onChange(n, id);
+        return r;
+      },
       all: (n) => run(n, 'readonly', (s) => s.getAll()),
       clear: (n) => run(n, 'readwrite', (s) => s.clear()),
     };
+    return api;
   })();
 
   // ---------------------------------------------------------------------------
@@ -673,6 +690,7 @@
     $('#setLead').value = String(REM.lead);
     remindStatus();
     updateStorage();
+    renderCloud();
   }
 
   async function updateStorage() {
@@ -793,11 +811,453 @@
   }
 
   async function wipe() {
-    if (!await confirmDialog('Delete everything?', 'Every file, note and study session on this device will be erased. This can\'t be undone.', 'Delete everything')) return;
-    stopSound(); await Promise.all([db.clear('docs'), db.clear('ink'), db.clear('plan'), db.clear('sounds')]);
+    const msg = cloud.user
+      ? 'Every file, note and study session on this device will be erased and you\'ll be signed out. Your cloud backup stays in your account.'
+      : 'Every file, note and study session on this device will be erased. This can\'t be undone.';
+    if (!await confirmDialog('Delete everything?', msg, 'Delete everything')) return;
+    if (cloud.user) { try { await cloudApi('auth', { action: 'logout' }); } catch { /* signed out locally anyway */ } cloud.user = null; }
+    stopSound(); await Promise.all([db.clear('docs'), db.clear('ink'), db.clear('plan'), db.clear('sounds'), db.clear('outbox')]);
     try { Object.keys(localStorage).filter((k) => k.startsWith('nota.')).forEach((k) => localStorage.removeItem(k)); } catch { /* ignore */ }
     location.reload();
   }
+
+  // ---------- Cloud backup and sync ----------
+  // Files stay on this device (they open instantly and work offline) and every change is also saved
+  // to the person's TaniNote account: details in the database, file contents in private storage.
+  // Conflicts: the most recent change to a record wins.
+  const FILE_KIND = { docs: 'doc', sounds: 'sound' };
+  const INLINE_MAX = 800 * 1024; // bigger records (huge annotation sets) travel as files
+  const cloud = {
+    available: null, user: null, running: false, again: false, timer: 0,
+    phase: 'idle', note: '', error: '', last: 0, pending: 0, used: 0,
+  };
+  const cKey = (k) => `cloud.${k}.${cloud.user ? cloud.user.email : ''}`;
+  const cloudFiles = {
+    set: null,
+    load() { cloudFiles.set = new Set(store.get(cKey('files'), [])); },
+    has(k) { return cloudFiles.set.has(k); },
+    add(k) { cloudFiles.set.add(k); store.set(cKey('files'), [...cloudFiles.set]); },
+    drop(k) { if (cloudFiles.set.delete(k)) store.set(cKey('files'), [...cloudFiles.set]); },
+  };
+
+  async function cloudApi(path, payload, method = 'POST') {
+    let res;
+    try {
+      res = await fetch('/api/' + path, {
+        method, credentials: 'same-origin', cache: 'no-store',
+        headers: method === 'GET' ? {} : { 'Content-Type': 'application/json', 'X-TaniNote': '1' },
+        body: method === 'GET' ? undefined : JSON.stringify(payload || {}),
+      });
+    } catch { const e = new Error('You\'re offline. Changes will back up when you\'re connected again.'); e.offline = true; throw e; }
+    let data = null;
+    try { data = await res.json(); } catch { /* not JSON */ }
+    if (!res.ok) {
+      const e = new Error((data && data.error) || 'The server didn\'t answer properly. Try again in a moment.');
+      e.status = res.status;
+      if (res.status === 401 && path !== 'auth') { cloud.user = null; renderCloud(); }
+      throw e;
+    }
+    return data || {};
+  }
+
+  // Queue a local change. Runs for every write once someone is signed in.
+  db.onChange = (n, id) => {
+    if (!cloud.user) return;
+    db.put('outbox', { k: n + '/' + id, store: n, id, t: Date.now() }).catch(() => {});
+    scheduleSync(2500);
+  };
+  function scheduleSync(ms = 2500) {
+    clearTimeout(cloud.timer);
+    cloud.timer = setTimeout(() => syncNow(), ms);
+  }
+
+  // Remote data is checked like a restored backup before it is stored.
+  function cleanDocMeta(d) {
+    if (!d || !ID_RE.test(d.id) || !KIND_LABEL[d.kind] || typeof d.name !== 'string') return null;
+    return {
+      id: d.id, name: d.name.slice(0, 200), kind: d.kind,
+      fileName: typeof d.fileName === 'string' ? d.fileName.slice(0, 200) : undefined,
+      mime: typeof d.mime === 'string' && /^[\w.+-]+\/[\w.+-]+$/.test(d.mime) ? d.mime : '',
+      size: +d.size || 0, pages: +d.pages || undefined,
+      created: +d.created || Date.now(), updated: +d.updated || Date.now(), opened: +d.opened || undefined,
+      fav: !!d.fav, subject: typeof d.subject === 'string' ? d.subject.slice(0, 80) || undefined : undefined,
+      paper: ['lined', 'grid', 'dots', 'blank'].includes(d.paper) ? d.paper : undefined,
+      thumb: isDataImg(d.thumb) ? d.thumb : undefined,
+      stats: d.stats && typeof d.stats === 'object' ? { pages: +d.stats.pages || 0, marked: +d.stats.marked || 0, hl: +d.stats.hl || 0, pen: +d.stats.pen || 0, notes: +d.stats.notes || 0 } : undefined,
+      file: d.file ? 1 : undefined,
+    };
+  }
+  function cleanRemote(n, d) {
+    if (n === 'docs') return cleanDocMeta(d);
+    if (n === 'ink') {
+      const o = cleanInk(d);
+      if (o && d.view && typeof d.view === 'object') o.view = { zoom: clamp(+d.view.zoom || 1, 0.1, 8), ratio: clamp(+d.view.ratio || 1, 0.1, 8), scroll: clamp(+d.view.scroll || 0, 0, 1) };
+      return o;
+    }
+    if (n === 'plan') {
+      if (!d || !ID_RE.test(d.id) || !DATE_RE.test(d.date) || typeof d.title !== 'string') return null;
+      return { id: d.id, date: d.date, time: /^\d{2}:\d{2}$/.test(d.time) ? d.time : '', title: d.title.slice(0, 120), minutes: clamp(+d.minutes || 45, 5, 600), docId: ID_RE.test(d.docId || '') ? d.docId : null, done: !!d.done, notified: d.notified ? 1 : undefined };
+    }
+    if (n === 'sounds') {
+      if (!d || !ID_RE.test(d.id) || typeof d.name !== 'string') return null;
+      return { id: d.id, name: d.name.slice(0, 80), size: +d.size || 0, type: /^audio\/[\w.+-]+$/.test(d.type) ? d.type : 'audio/mpeg', created: +d.created || Date.now(), file: d.file ? 1 : undefined };
+    }
+    return null;
+  }
+
+  async function uploadFile(kind, id, blob) {
+    const { url } = await cloudApi('file', { op: 'put', kind, id, size: blob.size });
+    let res;
+    try { res = await fetch(url, { method: 'PUT', body: blob, headers: { 'Content-Type': blob.type || 'application/octet-stream' } }); }
+    catch { const e = new Error('You\'re offline. Changes will back up when you\'re connected again.'); e.offline = true; throw e; }
+    if (!res.ok) throw new Error('A file didn\'t upload. TaniNote will try again.');
+    cloudFiles.add(kind + '/' + id);
+  }
+  async function downloadFile(kind, id) {
+    const { url } = await cloudApi('file', { op: 'get', kind, id });
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) throw new Error('A file didn\'t download from your cloud storage.');
+    return res.blob();
+  }
+
+  // Build what goes to the server for one queued change.
+  async function outgoing(e) {
+    const rec = await db.get(e.store, e.id);
+    if (!rec) return { store: e.store, id: e.id, m: e.t, deleted: true };
+    const { blob, ...data } = rec;
+    const kind = FILE_KIND[e.store];
+    if (kind && blob) {
+      if (!cloudFiles.has(kind + '/' + e.id)) {
+        cloud.note = `Uploading “${rec.name}”`; renderCloudStatus();
+        await uploadFile(kind, e.id, blob);
+      }
+      data.file = 1;
+    }
+    let out = data;
+    const json = JSON.stringify(data);
+    if (json.length > INLINE_MAX) {
+      await uploadFile('rec', e.store + '-' + e.id, new Blob([json], { type: 'application/json' }));
+      out = { id: e.id, $rec: 1 };
+    }
+    return { store: e.store, id: e.id, m: rec._m || e.t, data: out };
+  }
+
+  async function applyRemote(list) {
+    let touched = false;
+    for (const c of list) {
+      try {
+        const local = await db.get(c.store, c.id);
+        if (local && (local._m || 0) >= c.m) continue; // ours is the same or newer
+        if (c.deleted) {
+          if (!local) continue;
+          if (state.doc && state.doc.id === c.id) continue; // never pull a file out from under the reader
+          await db.del(c.store, c.id, { remote: true });
+          const kind = FILE_KIND[c.store];
+          if (kind) cloudFiles.drop(kind + '/' + c.id);
+          touched = true;
+          continue;
+        }
+        if (state.doc && state.doc.id === c.id) continue;
+        let data = c.data;
+        if (data && data.$rec) data = JSON.parse(await (await downloadFile('rec', c.store + '-' + c.id)).text());
+        const clean = cleanRemote(c.store, data);
+        if (!clean || clean.id !== c.id) continue;
+        clean._m = c.m;
+        const kind = FILE_KIND[c.store];
+        if (kind) {
+          if (local && local.blob) clean.blob = local.blob; // file contents never change after import
+          if (clean.file) cloudFiles.add(kind + '/' + c.id);
+        }
+        Object.keys(clean).forEach((k) => clean[k] === undefined && delete clean[k]);
+        await db.put(c.store, clean, { remote: true });
+        touched = true;
+      } catch (e) { if (e.offline || e.status === 401) throw e; /* skip one bad record */ }
+    }
+    return touched;
+  }
+
+  // Files whose contents live only in the cloud so far: bring them down for offline use.
+  async function fetchMissingFiles() {
+    for (const [n, kind] of Object.entries(FILE_KIND)) {
+      const recs = await db.all(n);
+      for (const r of recs) {
+        if (!r.file || r.blob || !cloud.user) continue;
+        cloud.note = `Downloading “${r.name}”`; renderCloudStatus();
+        try {
+          const blob = await downloadFile(kind, r.id);
+          const fresh = await db.get(n, r.id);
+          if (!fresh || fresh.blob) continue;
+          fresh.blob = new Blob([blob], { type: fresh.mime || fresh.type || blob.type });
+          await db.put(n, fresh, { remote: true });
+          if (n === 'sounds') snd.mine = (await db.all('sounds')).sort((a, b) => a.created - b.created);
+        } catch (e) { if (e.offline || e.status === 401) throw e; }
+      }
+    }
+  }
+  // Used when someone opens a file that hasn't come down yet.
+  async function ensureDocFile(doc) {
+    if (doc.blob || !doc.file || doc.kind === 'notebook' || doc.kind === 'doc') return doc;
+    if (!cloud.user) throw new Error('Sign in to download this file from your cloud backup.');
+    toast('Downloading from your cloud', 0);
+    const blob = await downloadFile('doc', doc.id);
+    doc.blob = new Blob([blob], { type: doc.mime || blob.type });
+    await db.put('docs', doc, { remote: true });
+    toast('Downloaded');
+    return doc;
+  }
+
+  async function syncNow(opts = {}) {
+    if (!cloud.user) return;
+    if (cloud.running) { cloud.again = true; return; }
+    cloud.running = true; cloud.error = ''; cloud.phase = 'busy'; renderCloudStatus();
+    const cursorKey = cKey('cursor');
+    let pulled = false;
+    try {
+      // 1. Send queued changes in batches small enough for one request.
+      for (;;) {
+        const queue = (await db.all('outbox')).sort((a, b) => a.t - b.t);
+        cloud.pending = queue.length;
+        if (!queue.length) break;
+        const batch = [], sent = [];
+        let bytes = 0;
+        for (const e of queue) {
+          const c = await outgoing(e);
+          const size = JSON.stringify(c).length;
+          if (batch.length && (bytes + size > 2.5e6 || batch.length >= 200)) break;
+          batch.push(c); sent.push(e); bytes += size;
+          cloud.note = `Backing up ${queue.length - sent.length} more`; renderCloudStatus();
+        }
+        const r = await cloudApi('sync', { cursor: store.get(cursorKey, 0), changes: batch });
+        for (const e of sent) {
+          const now = await db.get('outbox', e.k);
+          if (now && now.t === e.t) await db.del('outbox', e.k);
+          if (e.store in FILE_KIND && !(await db.get(e.store, e.id))) cloudFiles.drop(FILE_KIND[e.store] + '/' + e.id);
+        }
+        if (await applyRemote(r.changes || [])) pulled = true;
+        store.set(cursorKey, r.cursor);
+        if (r.more) break; // let the pull loop below fetch the rest first
+      }
+      // 2. Fetch everything changed elsewhere since last time.
+      for (;;) {
+        const r = await cloudApi('sync', { cursor: store.get(cursorKey, 0), changes: [] });
+        if (r.used != null) cloud.used = r.used;
+        if (await applyRemote(r.changes || [])) pulled = true;
+        store.set(cursorKey, r.cursor);
+        if (!r.more) break;
+        cloud.note = 'Bringing your files down'; renderCloudStatus();
+      }
+      if (pulled && !state.doc) await refresh();
+      await fetchMissingFiles();
+      if (pulled && !state.doc) await refresh();
+      cloud.last = Date.now(); store.set(cKey('last'), cloud.last);
+      cloud.pending = (await db.all('outbox')).length;
+      cloud.phase = cloud.pending ? 'busy' : 'ok';
+      if (ui.view === 'settings') renderCloud();
+      if (opts.loud) toast(cloud.pending ? 'Still backing up' : 'Everything is backed up');
+    } catch (e) {
+      cloud.phase = e.offline ? 'offline' : 'error';
+      cloud.error = e.message || 'Backup stopped.';
+      if (opts.loud) toast(cloud.error, 6000);
+      if (!e.offline && e.status !== 507 && e.status !== 401) scheduleSync(60000);
+    } finally {
+      cloud.running = false; cloud.note = '';
+      renderCloudStatus();
+      if (cloud.again) { cloud.again = false; scheduleSync(500); }
+    }
+  }
+
+  // Everything already on this device goes into the account the first time it is used here.
+  async function seedOutbox() {
+    const t = Date.now();
+    for (const n of ['docs', 'ink', 'plan', 'sounds']) {
+      for (const r of await db.all(n)) await db.put('outbox', { k: n + '/' + r.id, store: n, id: r.id, t });
+    }
+  }
+  async function localCount() { return (await db.all('docs')).length + (await db.all('plan')).length; }
+  async function clearDevice() {
+    stopSound();
+    if (state.doc) await closeDoc();
+    await Promise.all(['docs', 'ink', 'plan', 'sounds', 'outbox'].map((n) => db.clear(n)));
+  }
+
+  async function signedIn(user, isNew) {
+    cloud.user = user;
+    cloud.used = user.used || 0;
+    cloudFiles.load();
+    cloud.last = store.get(cKey('last'), 0);
+    const owner = store.get('cloudOwner', null);
+    store.set('cloudOwner', user.email);
+    if (owner !== user.email || isNew) await seedOutbox();
+    renderCloud();
+    syncNow();
+  }
+
+  async function initCloud() {
+    try {
+      const r = await cloudApi('auth', null, 'GET');
+      cloud.available = true;
+      if (r.user) {
+        cloud.user = r.user; cloud.used = r.user.used || 0;
+        cloudFiles.load(); cloud.last = store.get(cKey('last'), 0);
+        if (store.get('cloudOwner', null) !== r.user.email) { store.set('cloudOwner', r.user.email); await seedOutbox(); }
+        syncNow();
+      }
+    } catch (e) {
+      cloud.available = e.offline ? !!store.get('cloudOwner', null) : false;
+      if (e.offline) cloud.phase = 'offline';
+    }
+    renderCloud();
+  }
+
+  async function authSubmit(action) {
+    const email = $('#cloudEmail').value.trim();
+    const password = $('#cloudPass').value;
+    const msg = $('#cloudMsg');
+    msg.textContent = '';
+    if (!email || !password) { msg.textContent = 'Enter your email and a password.'; return; }
+    const owner = store.get('cloudOwner', null);
+    if (owner && owner.toLowerCase() !== email.toLowerCase() && await localCount()) {
+      if (!await confirmDialog('Files from another account', `The files on this device belong to ${owner}. To keep accounts separate they'll be removed from this device first. They stay safe in ${owner}'s cloud backup.`, 'Remove and continue')) return;
+      await clearDevice();
+      await refresh();
+    }
+    const btns = document.querySelectorAll('#cloudForm button');
+    btns.forEach((b) => b.disabled = true);
+    try {
+      const r = await cloudApi('auth', { action, email, password });
+      $('#cloudPass').value = '';
+      await signedIn(r.user, action === 'signup');
+      toast(action === 'signup' ? 'Account created. Backing up your files.' : 'Signed in. Syncing your files.');
+    } catch (e) { msg.textContent = e.message; }
+    finally { btns.forEach((b) => b.disabled = false); }
+  }
+
+  async function signOut() {
+    const pending = (await db.all('outbox')).length;
+    const box = el('input', '', { type: 'checkbox', checked: true });
+    const l = el('label', 'check-row'); l.append(box, el('span', '', { textContent: 'Also remove my files from this device' }));
+    const body = [el('p', '', { textContent: pending ? `${pending} change${pending === 1 ? ' hasn\'t' : 's haven\'t'} backed up yet. Stay signed in until they do, or they'll only exist on this device.` : 'Everything is backed up. Sign in again on any device to get your files back.' }), l];
+    if (!await openDialog({ title: 'Sign out?', body, ok: 'Sign out', danger: !!pending })) return;
+    try { await cloudApi('auth', { action: 'logout' }); } catch { /* the session ends locally anyway */ }
+    clearTimeout(cloud.timer);
+    const remove = box.checked && !pending;
+    cloud.user = null; cloud.phase = 'idle';
+    await db.clear('outbox');
+    if (remove) { await clearDevice(); store.set('cloudOwner', null); }
+    await refresh();
+    renderCloud();
+    toast(remove ? 'Signed out and removed your files from this device' : 'Signed out');
+  }
+
+  async function changePassword() {
+    const cur = el('input', '', { type: 'password', autocomplete: 'current-password', required: true });
+    const nxt = el('input', '', { type: 'password', autocomplete: 'new-password', minLength: 8, required: true });
+    const a = el('label'); a.append(el('span', '', { textContent: 'Current password' }), cur);
+    const b = el('label'); b.append(el('span', '', { textContent: 'New password (8 or more characters)' }), nxt);
+    if (!await openDialog({ title: 'Change password', body: [a, b], ok: 'Change password', focus: cur })) return;
+    try { await cloudApi('auth', { action: 'password', password: cur.value, newPassword: nxt.value }); toast('Password changed. Other devices were signed out.'); }
+    catch (e) { toast(e.message, 6000); }
+  }
+
+  async function deleteAccount() {
+    const pw = el('input', '', { type: 'password', autocomplete: 'current-password', required: true });
+    const l = el('label'); l.append(el('span', '', { textContent: 'Your password' }), pw);
+    const body = [el('p', '', { textContent: 'This permanently deletes your account and every file in your cloud backup. Files on this device stay here. This can\'t be undone.' }), l];
+    if (!await openDialog({ title: 'Delete your account?', body, ok: 'Delete account', danger: true, focus: pw })) return;
+    try {
+      await cloudApi('auth', { action: 'delete', password: pw.value });
+      cloud.user = null; cloud.phase = 'idle';
+      await db.clear('outbox');
+      store.set('cloudOwner', null);
+      renderCloud();
+      toast('Your account and cloud backup were deleted');
+    } catch (e) { toast(e.message, 6000); }
+  }
+
+  function renderCloudStatus() {
+    const btn = $('#cloudBtn');
+    const icon = !cloud.user ? 'ph-cloud-slash' : cloud.phase === 'busy' ? 'ph-cloud-arrow-up' : cloud.phase === 'error' ? 'ph-cloud-warning' : cloud.phase === 'offline' ? 'ph-cloud-x' : 'ph-cloud-check';
+    const label = !cloud.user ? (cloud.available ? 'Cloud backup is off. Sign in to turn it on.' : 'Cloud backup') : cloud.phase === 'busy' ? 'Backing up' : cloud.phase === 'error' ? 'Backup needs attention' : cloud.phase === 'offline' ? 'Offline. Changes will back up later.' : 'Everything is backed up';
+    if (btn) {
+      btn.hidden = cloud.available === false;
+      btn.innerHTML = `<i class="ph ${icon}"></i>`;
+      btn.title = label; btn.setAttribute('aria-label', label);
+      btn.dataset.state = cloud.user ? cloud.phase : 'off';
+    }
+    const s = $('#cloudStatus');
+    if (s && cloud.user) {
+      const text = cloud.phase === 'busy' ? (cloud.note || 'Backing up') + '…'
+        : cloud.phase === 'error' ? cloud.error
+        : cloud.phase === 'offline' ? 'Offline. Changes will back up when you\'re connected again.'
+        : cloud.last ? 'Everything is backed up · ' + fmtAgo(cloud.last) : 'Ready';
+      s.textContent = text;
+      s.dataset.state = cloud.phase;
+    }
+  }
+
+  function renderCloud() {
+    const card = $('#cloudCard');
+    if (!card) return;
+    const body = $('#cloudBody');
+    body.innerHTML = '';
+    const note = $('#dataNote');
+    if (note) note.lastChild.textContent = cloud.user
+      ? ' Your files are kept on this device and backed up to your TaniNote account. Only you can open them.'
+      : ' Everything stays on this device unless you turn on cloud backup. TaniNote loads no outside scripts.';
+    if (cloud.available === false) {
+      const here = location.hostname;
+      body.append(
+        el('p', 'set-note', { innerHTML: '<i class="ph ph-info" aria-hidden="true"></i>' }),
+      );
+      body.lastChild.append(document.createTextNode(here.endsWith('vercel.app') || here === 'localhost'
+        ? 'Cloud backup is unavailable right now. Your files are safe on this device.'
+        : 'Cloud backup lives at the new TaniNote address. To move your files: tap Download backup below, then open the new address and use Restore backup.'));
+      if (!here.endsWith('vercel.app') && here !== 'localhost') {
+        const a = el('a', 'btn navy', { href: 'https://taninote.vercel.app', target: '_blank', rel: 'noopener' });
+        a.innerHTML = '<i class="ph ph-arrow-square-out" aria-hidden="true"></i><span>Open taninote.vercel.app</span>';
+        const row = el('div', 'set-actions'); row.append(a); body.append(row);
+      }
+      renderCloudStatus();
+      return;
+    }
+    if (!cloud.user) {
+      body.append(el('p', 'set-note', { textContent: 'Create a free account to back up your files and open them on any phone, tablet or computer. Files you already have here are uploaded automatically.' }));
+      const form = el('form', 'cloud-form', { id: 'cloudForm', noValidate: true });
+      form.innerHTML = `
+        <label class="field"><span>Email</span><input type="email" id="cloudEmail" autocomplete="username" inputmode="email" maxlength="254" required placeholder="you@example.com"></label>
+        <label class="field"><span>Password</span><input type="password" id="cloudPass" autocomplete="current-password" minlength="8" maxlength="200" required placeholder="8 or more characters"></label>
+        <p class="cloud-msg" id="cloudMsg" role="alert"></p>
+        <div class="set-actions">
+          <button class="btn navy" type="submit" data-act="login"><i class="ph ph-sign-in" aria-hidden="true"></i><span>Sign in</span></button>
+          <button class="btn" type="button" data-act="signup"><i class="ph ph-user-plus" aria-hidden="true"></i><span>Create account</span></button>
+        </div>`;
+      form.addEventListener('submit', (e) => { e.preventDefault(); authSubmit('login'); });
+      form.querySelector('[data-act="signup"]').addEventListener('click', () => { $('#cloudPass').autocomplete = 'new-password'; authSubmit('signup'); });
+      body.append(form);
+      if (cloud.available === null) body.prepend(el('p', 'set-note', { textContent: 'Checking for cloud backup…' }));
+    } else {
+      const who = el('div', 'cloud-who');
+      who.innerHTML = '<i class="ph ph-user-circle" aria-hidden="true"></i>';
+      const t = el('div'); t.append(el('strong', '', { textContent: cloud.user.email }), el('small', '', { id: 'cloudStatus' }));
+      who.append(t);
+      body.append(who);
+      const used = el('div', 'storage');
+      used.innerHTML = `Cloud space: ${fmtSize(cloud.used || 0)} of 500 MB used<div class="bar"><i style="width:${Math.max(1, Math.min(100, Math.round((cloud.used || 0) / (500 * 1048576) * 100)))}%"></i></div>`;
+      body.append(used);
+      const row = el('div', 'set-actions');
+      const mk = (icon, text, fn, cls = 'btn') => { const b = el('button', cls); b.innerHTML = `<i class="ph ${icon}" aria-hidden="true"></i><span>${text}</span>`; b.addEventListener('click', fn); return b; };
+      row.append(mk('ph-arrows-clockwise', 'Back up now', () => syncNow({ loud: true })), mk('ph-key', 'Change password', changePassword), mk('ph-sign-out', 'Sign out', signOut));
+      body.append(row);
+      const del = el('button', 'link-btn danger-link', { textContent: 'Delete my account' });
+      del.addEventListener('click', deleteAccount);
+      body.append(del);
+    }
+    renderCloudStatus();
+  }
+
+  addEventListener('online', () => cloud.user && scheduleSync(1000));
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && cloud.user) scheduleSync(800); });
+  setInterval(() => { if (cloud.user && document.visibilityState === 'visible') syncNow(); }, 90000);
 
   // ---------- Study reminders ----------
   // Without a server, a web app can only remind while it is open (a tab, or installed to the home screen).
@@ -1995,6 +2455,9 @@
   async function openDoc(id) {
     const doc = await db.get('docs', id);
     if (!doc) { toast('That file is gone.'); refresh(); return; }
+    if (!doc.blob && doc.file && doc.kind !== 'notebook' && doc.kind !== 'doc') {
+      try { await ensureDocFile(doc); } catch (e) { toast(e.message || 'This file hasn\'t downloaded yet.', 6000); return; }
+    }
     closeMenu();
     state.doc = doc;
     state.ink = (await db.get('ink', id)) || { id, pages: {}, extra: [] };
@@ -2777,6 +3240,7 @@
   $('#todayMonth').addEventListener('click', () => { ui.month = new Date(parseDay(ui.day).getFullYear(), parseDay(ui.day).getMonth(), 1); showView('plan'); });
   $('#monthPrev').addEventListener('click', () => { ui.month = new Date(ui.month.getFullYear(), ui.month.getMonth() - 1, 1); renderPlan(); });
   $('#monthNext').addEventListener('click', () => { ui.month = new Date(ui.month.getFullYear(), ui.month.getMonth() + 1, 1); renderPlan(); });
+  $('#cloudBtn').addEventListener('click', () => { showView('settings'); setTimeout(() => $('#cloudCard').scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }), 50); });
   $('#profileBtn').addEventListener('click', () => { showView('settings'); setTimeout(() => $('#setName').focus(), 50); });
   $('#themeBtn').addEventListener('click', () => {
     const t = store.get('theme', 'auto');
@@ -2876,7 +3340,7 @@
   setTool('pen');
   const launchSession = new URLSearchParams(location.search).get('session');
   history.replaceState(null, '', location.pathname);
-  refresh().then(() => { if (launchSession && ID_RE.test(launchSession)) openSessionFile(launchSession); if (REM.on) loadRingtone(); });
+  refresh().then(() => { if (launchSession && ID_RE.test(launchSession)) openSessionFile(launchSession); if (REM.on) loadRingtone(); initCloud(); });
   if (!window.pdfjsLib || !window.PDFLib) toast('Some file readers didn\'t load. Reload TaniNote to try again.', 6000);
   // Test hook for the local preview only
   if (location.hostname === 'localhost') window.__tn = { state, pdfLines, matchPdfLine, lineAt, createTextAt, editPdfLine, snapHighlight, inkCanvas };

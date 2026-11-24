@@ -5,3 +5,7 @@ icons/options/
 .DS_Store
 # Duplicate copy of the soft piano track
 music/*(1).mp3
+.vercel/
+node_modules/
+.env*
+.vercel

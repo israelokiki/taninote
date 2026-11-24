@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' data: blob:; media-src 'self' blob: data:; worker-src 'self' blob:; frame-src 'self' about:; child-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; manifest-src 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' data: blob: https://vercel.com https://*.blob.vercel-storage.com; media-src 'self' blob: data:; worker-src 'self' blob:; frame-src 'self' about:; child-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; manifest-src 'self'">
 <meta name="referrer" content="no-referrer">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -39,7 +39,7 @@
     <div class="side-foot">
       <div class="side-photo" aria-hidden="true"><img src="images/sidebar-photo.jpg" alt="" width="520" height="420" decoding="async"></div>
       <div class="storage-mini" id="storageMini"></div>
-      <span class="version">Version 2.0.0</span>
+      <span class="version">Version 2.1.0</span>
     </div>
   </aside>
 
@@ -52,6 +52,7 @@
       <div class="top-actions">
         <label class="top-btn" title="Import files"><i class="ph ph-tray-arrow-down"></i><span class="sr">Import files</span><input type="file" id="fileInput" multiple hidden></label>
         <button class="top-btn sound-btn" id="soundBtn" title="Reading sounds" aria-label="Reading sounds" aria-haspopup="dialog"><i class="ph ph-headphones"></i><span class="eq" aria-hidden="true"><i></i><i></i><i></i></span></button>
+        <button class="top-btn cloud" id="cloudBtn" hidden title="Cloud backup" aria-label="Cloud backup"><i class="ph ph-cloud-slash"></i></button>
         <button class="top-btn bell" id="bellBtn" title="Study reminders" aria-label="Study reminders"><i class="ph ph-bell"></i><span class="bell-badge" id="bellBadge" hidden></span></button>
         <button class="top-btn" id="themeBtn" title="Switch theme" aria-label="Switch theme"><i class="ph ph-moon"></i></button>
         <button class="profile" id="profileBtn" title="Settings">
@@ -217,6 +218,10 @@
               </div>
             </div>
           </section>
+          <section class="set-card cloud-card" id="cloudCard">
+            <h2>Account &amp; cloud backup</h2>
+            <div id="cloudBody"></div>
+          </section>
           <section class="set-card">
             <h2>Writing</h2>
             <div class="field row"><span>Pencil only<small>Only the stylus draws. Fingers scroll and pinch.</small></span>
@@ -248,7 +253,7 @@
           </section>
           <section class="set-card">
             <h2>Your data</h2>
-            <p class="set-note"><i class="ph ph-lock-simple" aria-hidden="true"></i>Everything stays on this device. TaniNote has no account, sends nothing to a server and loads no outside scripts.</p>
+            <p class="set-note" id="dataNote"><i class="ph ph-lock-simple" aria-hidden="true"></i> Everything stays on this device unless you turn on cloud backup. TaniNote loads no outside scripts.</p>
             <div class="storage" id="storageFull"></div>
             <div class="set-actions">
               <button class="btn" id="backupBtn"><i class="ph ph-download-simple" aria-hidden="true"></i><span>Download backup</span></button>

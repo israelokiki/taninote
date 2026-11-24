@@ -1,5 +1,5 @@
 // TaniNote service worker: keeps the app usable offline. Only same-origin files are cached.
-const CACHE = 'taninote-v2.0.0';
+const CACHE = 'taninote-v2.1.0';
 const CORE = [
   './', 'index.html', 'app.css', 'app.js', 'manifest.webmanifest',
   'icons/icon.svg', 'images/sidebar-photo.jpg', 'icons/favicon-32.png', 'icons/apple-touch-icon.png', 'icons/icon-192.png', 'icons/icon-512.png',
@@ -23,6 +23,8 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET' || url.origin !== self.location.origin) return;
   // Music streams in byte ranges; leave it to the network rather than caching partial responses.
   if (url.pathname.includes('/music/')) return;
+  // Accounts and sync always talk to the server directly.
+  if (url.pathname.startsWith('/api/')) return;
   // Libraries never change for a version: cache first. App files: network first so updates arrive.
   if (url.pathname.includes('/vendor/') || url.pathname.includes('/icons/')) {
     e.respondWith(caches.match(req).then((hit) => hit || fetch(req).then((res) => {

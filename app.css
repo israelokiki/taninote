@@ -971,3 +971,26 @@ body.editing .flowdoc > .sheet .tbox { pointer-events: auto; }
 .formatbar.box .flow-only { display: none; }
 .tbox.replace { border-radius: 2px; }
 .tbox.replace:focus { box-shadow: 0 0 0 1.5px rgb(34 87 214 / 0.55) !important; }
+
+/* ---------- Account & cloud backup ---------- */
+.cloud-card #cloudBody { display: grid; gap: 14px; }
+.cloud-form { display: grid; gap: 12px; }
+.field input[type="email"], .field input[type="password"], .dialog input[type="password"] {
+  height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: var(--panel); color: var(--text); font-weight: 500; width: 100%; font-size: 16px;
+}
+.cloud-msg { margin: 0; min-height: 0; color: var(--danger); font-size: 14px; font-weight: 500; }
+.cloud-msg:empty { display: none; }
+.cloud-who { display: flex; gap: 12px; align-items: center; min-width: 0; }
+.cloud-who > i { font-size: 34px; color: var(--muted); flex: none; }
+.cloud-who > div { display: grid; gap: 2px; min-width: 0; }
+.cloud-who strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cloud-who small { color: var(--muted); font-size: 13px; }
+.cloud-who small[data-state="error"] { color: var(--danger); }
+.link-btn { justify-self: start; background: none; border: 0; padding: 4px 0; font: inherit; font-size: 14px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.danger-link { color: var(--danger); }
+.check-row { display: flex; gap: 10px; align-items: center; font-weight: 500; margin-top: 12px; }
+.check-row input { width: 20px; height: 20px; accent-color: var(--primary); flex: none; }
+.top-btn.cloud[data-state="busy"] i { animation: cloud-pulse 1.6s ease-in-out infinite; }
+.top-btn.cloud[data-state="error"] { color: #ffb4ad; }
+@keyframes cloud-pulse { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .top-btn.cloud[data-state="busy"] i { animation: none; } }
