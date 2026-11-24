@@ -1149,6 +1149,45 @@
     toast(remove ? 'Signed out and removed your files from this device' : 'Signed out');
   }
 
+  async function forgotPassword(prefill) {
+    const input = el('input', '', { type: 'email', value: prefill || '', autocomplete: 'username', inputMode: 'email', maxLength: 254, required: true });
+    const l = el('label'); l.append(el('span', '', { textContent: 'Your account email' }), input);
+    const body = [el('p', '', { textContent: 'We\'ll email you a link to choose a new password. It works once and expires in 30 minutes.' }), l];
+    if (!await openDialog({ title: 'Reset your password', body, ok: 'Send reset link', focus: input })) return;
+    try {
+      await cloudApi('auth', { action: 'forgot', email: input.value.trim() });
+      await openDialog({ title: 'Check your email', body: [el('p', '', { textContent: `If ${input.value.trim()} has a TaniNote account, a reset link is on its way. Look in your spam folder too. Open the link on this device or any other.` })], ok: 'OK' });
+    } catch (e) { toast(e.message, 7000); }
+  }
+
+  async function resetPassword(token) {
+    const a = el('input', '', { type: 'password', autocomplete: 'new-password', minLength: 8, maxLength: 200, required: true });
+    const b = el('input', '', { type: 'password', autocomplete: 'new-password', minLength: 8, maxLength: 200, required: true });
+    const la = el('label'); la.append(el('span', '', { textContent: 'New password (8 or more characters)' }), a);
+    const lb = el('label'); lb.append(el('span', '', { textContent: 'Type it again' }), b);
+    for (;;) {
+      if (!await openDialog({ title: 'Choose a new password', body: [la, lb], ok: 'Save password', focus: a })) return;
+      if (a.value.length < 8) { toast('Use at least 8 characters.'); continue; }
+      if (a.value !== b.value) { toast('The two passwords don\'t match.'); b.value = ''; continue; }
+      break;
+    }
+    let r;
+    try { r = await cloudApi('auth', { action: 'reset', token, password: a.value }); }
+    catch (e) { toast(e.message, 7000); return; }
+    const owner = store.get('cloudOwner', null);
+    if (owner && owner !== r.user.email && await localCount()) {
+      if (!await confirmDialog('Files from another account', `Your password is changed. The files on this device belong to ${owner}. To sign in here they'll be removed from this device first. They stay safe in ${owner}'s cloud backup.`, 'Remove and sign in')) {
+        try { await cloudApi('auth', { action: 'logout' }); } catch { /* ignore */ }
+        toast('Password changed. Sign in when you\'re ready.');
+        return;
+      }
+      await clearDevice();
+      await refresh();
+    }
+    await signedIn(r.user, false);
+    toast('Password changed. You\'re signed in.');
+  }
+
   async function changePassword() {
     const cur = el('input', '', { type: 'password', autocomplete: 'current-password', required: true });
     const nxt = el('input', '', { type: 'password', autocomplete: 'new-password', minLength: 8, required: true });
@@ -1227,11 +1266,13 @@
         <label class="field"><span>Email</span><input type="email" id="cloudEmail" autocomplete="username" inputmode="email" maxlength="254" required placeholder="you@example.com"></label>
         <label class="field"><span>Password</span><input type="password" id="cloudPass" autocomplete="current-password" minlength="8" maxlength="200" required placeholder="8 or more characters"></label>
         <p class="cloud-msg" id="cloudMsg" role="alert"></p>
+        <button class="link-btn" type="button" data-act="forgot">Forgot password?</button>
         <div class="set-actions">
           <button class="btn navy" type="submit" data-act="login"><i class="ph ph-sign-in" aria-hidden="true"></i><span>Sign in</span></button>
           <button class="btn" type="button" data-act="signup"><i class="ph ph-user-plus" aria-hidden="true"></i><span>Create account</span></button>
         </div>`;
       form.addEventListener('submit', (e) => { e.preventDefault(); authSubmit('login'); });
+      form.querySelector('[data-act="forgot"]').addEventListener('click', () => forgotPassword($('#cloudEmail').value.trim()));
       form.querySelector('[data-act="signup"]').addEventListener('click', () => { $('#cloudPass').autocomplete = 'new-password'; authSubmit('signup'); });
       body.append(form);
       if (cloud.available === null) body.prepend(el('p', 'set-note', { textContent: 'Checking for cloud backup…' }));
@@ -3339,8 +3380,9 @@
   setPenOnly(state.penOnly);
   setTool('pen');
   const launchSession = new URLSearchParams(location.search).get('session');
+  const resetToken = (location.hash.match(/^#reset=([A-Za-z0-9_-]{40,60})$/) || [])[1];
   history.replaceState(null, '', location.pathname);
-  refresh().then(() => { if (launchSession && ID_RE.test(launchSession)) openSessionFile(launchSession); if (REM.on) loadRingtone(); initCloud(); });
+  refresh().then(() => { if (launchSession && ID_RE.test(launchSession)) openSessionFile(launchSession); if (REM.on) loadRingtone(); initCloud().then(() => { if (resetToken) { showView('settings'); resetPassword(resetToken); } }); });
   if (!window.pdfjsLib || !window.PDFLib) toast('Some file readers didn\'t load. Reload TaniNote to try again.', 6000);
   // Test hook for the local preview only
   if (location.hostname === 'localhost') window.__tn = { state, pdfLines, matchPdfLine, lineAt, createTextAt, editPdfLine, snapHighlight, inkCanvas };

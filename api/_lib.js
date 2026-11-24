@@ -40,6 +40,11 @@ export function ensureSchema() {
          path text not null,
          size bigint not null,
          primary key (user_id, path))`,
+      `create table if not exists resets (
+         token_hash text primary key,
+         user_id uuid not null references users(id) on delete cascade,
+         expires timestamptz not null,
+         used boolean not null default false)`,
       `create table if not exists attempts (
          k text primary key,
          n integer not null,
@@ -110,7 +115,7 @@ export const DUMMY_HASH = 'scrypt$32768$AAAAAAAAAAAAAAAAAAAAAA==$AAAAAAAAAAAAAAA
 // ---------- Sessions ----------
 const COOKIE = '__Host-tn';
 const SESSION_DAYS = 60;
-const sha = (s) => createHash('sha256').update(s).digest('base64url');
+export const sha = (s) => createHash('sha256').update(s).digest('base64url');
 
 export async function startSession(res, userId) {
   const token = randomBytes(32).toString('base64url');

@@ -3,9 +3,12 @@
   "private": true,
   "type": "module",
   "description": "TaniNote: a note-taking web app for students. Static front end plus small Vercel functions for accounts and cloud sync.",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "@neondatabase/serverless": "1.2.1",
-    "@vercel/blob": "2.9.0"
+    "@vercel/blob": "2.9.0",
+    "nodemailer": "7.0.13"
   }
 }
